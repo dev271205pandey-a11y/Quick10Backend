@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
 
 const app = express();
 
@@ -13,7 +12,7 @@ const products = [
   { id: '2', name: 'Bread', price: 50, stock: 50 }
 ];
 
-// Simple Health Check
+// Health Check
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Backend is running!' });
 });
