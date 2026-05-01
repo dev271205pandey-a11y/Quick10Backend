@@ -30,7 +30,7 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage });
 
 // ================================================================
-// DATABASE (In Memory)
+// DATABASE
 // ================================================================
 let users = [];
 let orders = [];
@@ -138,7 +138,7 @@ const categories = [
 ];
 
 // ================================================================
-// HELPER FUNCTIONS
+// HELPERS
 // ================================================================
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -162,7 +162,7 @@ function findOrCreateUser(phone) {
 // ROUTES
 // ================================================================
 
-// Health Check
+// Health
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
@@ -204,6 +204,13 @@ app.post('/api/auth/verify-otp', (req, res) => {
   if (!phone || !otp) {
     return res.status(400).json({ success: false, message: 'Phone and OTP required' });
   }
+
+  // Test OTP for development
+  if (otp === '123456') {
+    const user = findOrCreateUser(phone);
+    return res.json({ success: true, message: 'Login successful', user });
+  }
+
   const stored = otpStore[phone];
   if (!stored) {
     return res.status(400).json({ success: false, message: 'OTP not sent. Please request again.' });
@@ -258,7 +265,8 @@ app.post('/api/products', (req, res) => {
 
   const product = {
     id: 'p' + Date.now(),
-    name, price: Number(price),
+    name,
+    price: Number(price),
     mrp: Number(mrp) || Number(price),
     weight: weight || (quantity + unit),
     unit, category, categoryName,
@@ -309,7 +317,7 @@ app.get('/api/categories', (req, res) => {
 
 // ── USERS ─────────────────────────────────────────────────────
 app.get('/api/users/:phone', (req, res) => {
-  const user = users.find(u => u.phone === req.params.phone);
+  const user = users.find(u => u.phone === phone);
   if (!user) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
@@ -401,7 +409,7 @@ app.post('/api/delivery/accept-order', (req, res) => {
 });
 
 // ================================================================
-// SELF PING — Server को sleep से बचाओ
+// SERVER START + SELF PING
 // ================================================================
 const PORT = process.env.PORT || 5000;
 
@@ -409,13 +417,13 @@ app.listen(PORT, () => {
   console.log('Quick10 Backend running on port ' + PORT);
   console.log('Products: ' + products.length);
   console.log('Cloudinary: dw1fwrcz0');
+  console.log('Test OTP: 123456');
 
-  // हर 14 minute में खुद को ping करो
   setInterval(() => {
     https.get('https://quick10backend.onrender.com/health', (res) => {
-      console.log('Self ping OK - Server awake - ' + new Date().toLocaleTimeString());
+      console.log('Self ping OK - ' + new Date().toLocaleTimeString());
     }).on('error', (err) => {
-      console.log('Self ping error: ' + err.message);
+      console.log('Ping error: ' + err.message);
     });
   }, 14 * 60 * 1000);
 });
