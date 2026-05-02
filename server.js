@@ -348,6 +348,21 @@ app.get('/api/users/:phone', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+app.delete('/api/users/:phone/addresses/:addressId', async (req, res) => {
+  try {
+    const user = await User.findOne({ phone: req.params.phone });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    user.addresses = user.addresses.filter(
+      a => a.id !== req.params.addressId
+    );
+    await user.save();
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 app.put('/api/users/:phone', async (req, res) => {
   try {
