@@ -373,6 +373,23 @@ app.delete('/api/categories/:id', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// Update Category
+app.put('/api/categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, categoryId, imageUrl, color, active } = req.body;
+    
+    const category = await Category.findByIdAndUpdate(
+      id,
+      { name, categoryId, imageUrl, color, active },
+      { new: true }
+    );
+    
+    res.json({ success: true, category });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 app.put('/api/users/:phone', async (req, res) => {
   try {
