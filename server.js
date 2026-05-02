@@ -363,6 +363,16 @@ app.delete('/api/users/:phone/addresses/:addressId', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// Delete Category
+app.delete('/api/categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await Category.findByIdAndDelete(id);
+    res.json({ success: true, message: 'Category deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 app.put('/api/users/:phone', async (req, res) => {
   try {
