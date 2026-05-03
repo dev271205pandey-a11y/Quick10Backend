@@ -413,6 +413,61 @@ app.delete('/api/fresh-categories/:id', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ── STAFF ─────────────────────────────────────────────────
+const StaffSchema = new mongoose.Schema({
+  name: String,
+  phone: { type: String, unique: true },
+  password: String,
+  role: { type: String, default: 'picker' }, // admin | picker
+  bankName: String,
+  accountNo: String,
+  ifsc: String,
+  active: { type: Boolean, default: true },
+}, { timestamps: true });
+
+const Staff = mongoose.model('Staff', StaffSchema);
+
+app.get('/api/staff', async (req, res) => {
+  try {
+    const staff = await Staff.find({}).sort({ createdAt: -1 });
+    res.json({ success: true, staff });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/staff', async (req, res) => {
+  try {
+    const exists = await Staff.findOne({ phone: req.body.phone });
+    if (exists) return res.json({ success: false, message: 'यह phone number पहले से registered है' });
+    const staff = new Staff(req.body);
+    await staff.save();
+    res.json({ success: true, staff });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/staff/:id', async (req, res) => {
+  try {
+    await Staff.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Staff removed' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Staff login
+app.post('/api/staff/login', async (req, res) => {
+  try {
+    const { phone, password } = req.body;
+    const staff = await Staff.findOne({ phone, password, active: true });
+    if (!staff) return res.json({ success: false, message: 'Phone या password गलत है' });
+    res.json({ success: true, staff });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
