@@ -67,12 +67,87 @@ app.get('/health', (req, res) => {
 });
 
 // ── AUTH ─────────────────────────────────────────────────────
+// ── AUTH ─────────────────────────────────────────────────
 app.post('/api/auth/send-otp', async (req, res) => {
   try {
     const { phone } = req.body;
-    const otp = '123456';
+    if (!phone || phone.length !== 10) {
+      return res.json({ success: false, message: 'Valid 10-digit phone number डालो' });
+    }
+
+    // 6-digit OTP generate
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // OTP store in memory (5 min expiry)
+    global.otpStore = global.otpStore || {};
+    global.otpStore[phone] = {
+      otp,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    };
+
     console.log(`OTP for ${phone}: ${otp}`);
-    res.json({ success: true, message: 'OTP sent', otp });
+
+    // Fast2SMS से real OTP भेजो
+    const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+      method: 'POST',
+      headers: {
+        'authorization': 'JdE2bRQN0OvnSTjPVhMoGa8c1DBm7rsCzlYUWxFpf56yHu3wIXolJINA617i3brxVmug4BaZyUKc2p08',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        route: 'otp',
+        variables_values: otp,
+        numbers: phone,
+      }),
+    });
+
+    const smsData = await response.json();
+    console.log('Fast2SMS response:', smsData);
+
+    if (smsData.return === true) {
+      res.json({ success: true, message: 'OTP sent successfully' });
+    } else {
+      // SMS fail हो तो भी OTP store है — dev mode में काम करेगा
+      console.log('SMS failed but OTP stored:', otp);
+      res.json({ success: true, message: 'OTP sent', debug: smsData.message });
+    }
+  } catch (err) {
+    console.log('Send OTP error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+  try {
+    const { phone, otp } = req.body;
+
+    global.otpStore = global.otpStore || {};
+    const stored = global.otpStore[phone];
+
+    if (!stored) {
+      return res.json({ success: false, message: 'OTP expired या send नहीं हुआ। फिर try करो।' });
+    }
+
+    if (Date.now() > stored.expiresAt) {
+      delete global.otpStore[phone];
+      return res.json({ success: false, message: 'OTP expire हो गया। फिर भेजो।' });
+    }
+
+    if (stored.otp !== otp.toString()) {
+      return res.json({ success: false, message: 'OTP गलत है' });
+    }
+
+    // OTP सही — delete करो
+    delete global.otpStore[phone];
+
+    // User find या create करो
+    let user = await User.findOne({ phone });
+    if (!user) {
+      user = new User({ phone });
+      await user.save();
+    }
+
+    res.json({ success: true, user, message: 'Login successful' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
