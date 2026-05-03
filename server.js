@@ -88,18 +88,10 @@ app.post('/api/auth/send-otp', async (req, res) => {
     console.log(`OTP for ${phone}: ${otp}`);
 
     // Fast2SMS से real OTP भेजो
-    const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-      method: 'POST',
-      headers: {
-        'authorization': 'JdE2bRQN0OvnSTjPVhMoGa8c1DBm7rsCzlYUWxFpf56yHu3wIXolJINA617i3brxVmug4BaZyUKc2p08',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        route: 'otp',
-        variables_values: otp,
-        numbers: phone,
-      }),
-    });
+   const response = await fetch(
+      `https://www.fast2sms.com/dev/bulkV2?authorization=JdE2bRQN0OvnSTjPVhMoGa8c1DBm7rsCzlYUWxFpf56yHu3wIXolJINA617i3brxVmug4BaZyUKc2p08&route=q&message=Your%20Quick10%20OTP%20is%20${otp}.%20Valid%20for%205%20minutes.&language=english&flash=0&numbers=${phone}`,
+      { method: 'GET' }
+    );
 
     const smsData = await response.json();
     console.log('Fast2SMS response:', smsData);
