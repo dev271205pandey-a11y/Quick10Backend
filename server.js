@@ -366,6 +366,53 @@ app.post('/api/upload', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ── FRESH CATEGORIES ──────────────────────────────────────
+const FreshCategorySchema = new mongoose.Schema({
+  name: String,
+  imageUrl: String,
+  active: { type: Boolean, default: true },
+  order: { type: Number, default: 0 },
+}, { timestamps: true });
+
+const FreshCategory = mongoose.model('FreshCategory', FreshCategorySchema);
+
+app.get('/api/fresh-categories', async (req, res) => {
+  try {
+    const cats = await FreshCategory.find({ active: true }).sort({ order: 1 });
+    res.json({ success: true, categories: cats });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/fresh-categories', async (req, res) => {
+  try {
+    const cat = new FreshCategory(req.body);
+    await cat.save();
+    res.json({ success: true, category: cat });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/fresh-categories/:id', async (req, res) => {
+  try {
+    const cat = await FreshCategory.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!cat) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, category: cat });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/fresh-categories/:id', async (req, res) => {
+  try {
+    await FreshCategory.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
