@@ -89,7 +89,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
 
     // ✅ 2Factor.in से Real OTP भेजो
     const response = await fetch(
-      `https://2factor.in/API/V1/60a4f241-4736-11f1-9800-0200cd936042/SMS/${phone}/${otp}/AUTOGEN`,
+   `https://2factor.in/API/V1/60a4f241-4736-11f1-9800-0200cd936042/SMS/${phone}/${otp}`,
       { method: 'GET' }
     );
 
