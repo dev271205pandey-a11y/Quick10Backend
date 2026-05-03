@@ -78,7 +78,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
     // 6-digit OTP generate
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // OTP store in memory (5 min expiry)
+    // OTP store (5 min expiry)
     global.otpStore = global.otpStore || {};
     global.otpStore[phone] = {
       otp,
@@ -87,21 +87,21 @@ app.post('/api/auth/send-otp', async (req, res) => {
 
     console.log(`OTP for ${phone}: ${otp}`);
 
-    // Fast2SMS से real OTP भेजो
-   const response = await fetch(
-      `https://www.fast2sms.com/dev/bulkV2?authorization=JdE2bRQN0OvnSTjPVhMoGa8c1DBm7rsCzlYUWxFpf56yHu3wIXolJINA617i3brxVmug4BaZyUKc2p08&route=q&message=Your%20Quick10%20OTP%20is%20${otp}.%20Valid%20for%205%20minutes.&language=english&flash=0&numbers=${phone}`,
+    // ✅ 2Factor.in से Real OTP भेजो
+    const response = await fetch(
+      `https://2factor.in/API/V1/60a4f241-4736-11f1-9800-0200cd936042/SMS/${phone}/${otp}/AUTOGEN`,
       { method: 'GET' }
     );
 
     const smsData = await response.json();
-    console.log('Fast2SMS response:', smsData);
+    console.log('2Factor response:', smsData);
 
-    if (smsData.return === true) {
+    if (smsData.Status === 'Success') {
       res.json({ success: true, message: 'OTP sent successfully' });
     } else {
-      // SMS fail हो तो भी OTP store है — dev mode में काम करेगा
-      console.log('SMS failed but OTP stored:', otp);
-      res.json({ success: true, message: 'OTP sent', debug: smsData.message });
+      console.log('2Factor failed:', smsData);
+      // Fallback — OTP response में भेजो
+      res.json({ success: true, message: 'OTP sent', otp });
     }
   } catch (err) {
     console.log('Send OTP error:', err.message);
