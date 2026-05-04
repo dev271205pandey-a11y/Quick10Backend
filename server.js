@@ -537,6 +537,56 @@ app.post('/api/staff/login', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ── MOTHER CATEGORIES ─────────────────────────────────────
+const MotherCategorySchema = new mongoose.Schema({
+  name: String,
+  categoryId: { type: String, unique: true },
+  iconUrl: String,
+  active: { type: Boolean, default: true },
+  order: { type: Number, default: 0 },
+}, { timestamps: true });
+
+const MotherCategory = mongoose.model('MotherCategory', MotherCategorySchema);
+
+app.get('/api/mother-categories', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const cats = await MotherCategory.find({ active: true }).sort({ order: 1 });
+    res.json({ success: true, categories: cats });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/mother-categories', async (req, res) => {
+  try {
+    const cat = new MotherCategory(req.body);
+    await cat.save();
+    res.json({ success: true, category: cat });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/mother-categories/:id', async (req, res) => {
+  try {
+    const cat = await MotherCategory.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!cat) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, category: cat });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/mother-categories/:id', async (req, res) => {
+  try {
+    const result = await MotherCategory.findByIdAndDelete(req.params.id);
+    if (!result) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
