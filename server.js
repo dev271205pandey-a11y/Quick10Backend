@@ -37,6 +37,8 @@ const CategorySchema = new mongoose.Schema({
   color: String,
   bg: String,
   active: { type: Boolean, default: true },
+  showInHeader: { type: Boolean, default: false }, // ✅ Header में दिखाओ
+  showInAll: { type: Boolean, default: true },     // ✅ All Categories में दिखाओ
 }, { timestamps: true });
 
 const OrderSchema = new mongoose.Schema({
