@@ -588,6 +588,46 @@ app.post('/api/upload', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ── RAZORPAY ─────────────────────────────────────────────────
+const Razorpay = require('razorpay');
+const razorpay = new Razorpay({
+  key_id: 'rzp_test_SmOBM3Muj6dQnF',
+  key_secret: '5M8Z7lP82qM4cNPxaQyrx12k',
+});
+
+app.post('/api/payment/create-order', async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const options = {
+      amount: amount * 100, // Paise में
+      currency: 'INR',
+      receipt: 'order_' + Date.now(),
+    };
+    const order = await razorpay.orders.create(options);
+    res.json({ success: true, order });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/payment/verify', async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const crypto = require('crypto');
+    const sign = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSign = crypto
+      .createHmac('sha256', '5M8Z7lP82qM4cNPxaQyrx12k')
+      .update(sign)
+      .digest('hex');
+    if (expectedSign === razorpay_signature) {
+      res.json({ success: true, message: 'Payment verified!' });
+    } else {
+      res.json({ success: false, message: 'Invalid signature' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // ── SERVER START ─────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
