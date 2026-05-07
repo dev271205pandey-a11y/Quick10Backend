@@ -176,12 +176,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
     }
 
     // 2Factor voice OTP भी try करो
-    try {
-      await fetch(
-        `https://2factor.in/API/V1/60a4f241-4736-11f1-9800-0200cd936042/SMS/${phone}/${otp}/AUTOGEN`,
-        { method: 'GET' }
-      );
-    } catch {}
+   
 
     res.json({
       success: true,
