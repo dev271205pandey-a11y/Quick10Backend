@@ -126,9 +126,18 @@ io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
 
   // User अपना phone register करे
-  socket.on('register', (phone) => {
+ socket.on('register', (phone) => {
     connectedUsers[phone] = socket.id;
     console.log(`Phone ${phone} registered with socket ${socket.id}`);
+    
+    // ✅ अगर OTP already store है तो तुरंत भेजो
+    if (otpStore[phone] && Date.now() < otpStore[phone].expiresAt) {
+      socket.emit('otp_received', {
+        otp: otpStore[phone].otp,
+        message: `Quick10 OTP: ${otpStore[phone].otp}`,
+      });
+      console.log(`Pending OTP sent to ${phone} on register`);
+    }
   });
 
   socket.on('disconnect', () => {
