@@ -122,29 +122,93 @@ setInterval(cleanExpiredOTPs, 30 * 1000);
 // ── SOCKET.IO ─────────────────────────────────────────────────
 const connectedUsers = {}; // phone → socketId
 
+const chatMessages = {}; // phone → messages array
+
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
 
-  // User अपना phone register करे
- socket.on('register', (phone) => {
+  socket.on('register', (phone) => {
     connectedUsers[phone] = socket.id;
-    console.log(`Phone ${phone} registered with socket ${socket.id}`);
-    
-    // ✅ अगर OTP already store है तो तुरंत भेजो
+    console.log(`Phone ${phone} registered`);
     if (otpStore[phone] && Date.now() < otpStore[phone].expiresAt) {
       socket.emit('otp_received', {
         otp: otpStore[phone].otp,
         message: `Quick10 OTP: ${otpStore[phone].otp}`,
       });
-      console.log(`Pending OTP sent to ${phone} on register`);
     }
   });
 
+  // ✅ Admin register
+  socket.on('register_admin', () => {
+    connectedUsers['admin'] = socket.id;
+    console.log('Admin registered:', socket.id);
+    // Admin को सब active chats भेजो
+    socket.emit('all_chats', chatMessages);
+  });
+
+  // ✅ Customer → message भेजो
+  socket.on('customer_message', (data) => {
+    const { phone, message, name } = data;
+    if (!chatMessages[phone]) {
+      chatMessages[phone] = { phone, name: name || phone, messages: [] };
+    }
+    const msg = {
+      id: Date.now(),
+      text: message,
+      sender: 'customer',
+      time: new Date().toISOString(),
+    };
+    chatMessages[phone].messages.push(msg);
+
+    // Admin को notify करो
+    const adminSocketId = connectedUsers['admin'];
+    if (adminSocketId) {
+      io.to(adminSocketId).emit('new_customer_message', {
+        phone,
+        name: name || phone,
+        message: msg,
+        allMessages: chatMessages[phone].messages,
+      });
+    }
+
+    // Customer को confirm करो
+    socket.emit('message_sent', msg);
+  });
+
+  // ✅ Admin → reply भेजो
+  socket.on('admin_reply', (data) => {
+    const { phone, message } = data;
+    if (!chatMessages[phone]) {
+      chatMessages[phone] = { phone, messages: [] };
+    }
+    const msg = {
+      id: Date.now(),
+      text: message,
+      sender: 'admin',
+      time: new Date().toISOString(),
+    };
+    chatMessages[phone].messages.push(msg);
+
+    // Customer को भेजो
+    const customerSocketId = connectedUsers[phone];
+    if (customerSocketId) {
+      io.to(customerSocketId).emit('admin_message', msg);
+    }
+
+    // Admin को confirm करो
+    socket.emit('reply_sent', { phone, msg });
+  });
+
+  // ✅ Chat history request
+  socket.on('get_chat_history', (phone) => {
+    const history = chatMessages[phone]?.messages || [];
+    socket.emit('chat_history', history);
+  });
+
   socket.on('disconnect', () => {
-    // Remove from connectedUsers
-    Object.keys(connectedUsers).forEach(phone => {
-      if (connectedUsers[phone] === socket.id) {
-        delete connectedUsers[phone];
+    Object.keys(connectedUsers).forEach(key => {
+      if (connectedUsers[key] === socket.id) {
+        delete connectedUsers[key];
       }
     });
     console.log('Socket disconnected:', socket.id);
