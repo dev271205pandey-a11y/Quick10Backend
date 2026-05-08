@@ -121,16 +121,18 @@ const cleanExpiredOTPs = () => {
 setInterval(cleanExpiredOTPs, 30 * 1000);
 
 // ── SOCKET.IO ─────────────────────────────────────────────────
-const connectedUsers = {}; // phone → socketId
-
-const chatMessages = {}; // phone → messages array
+// ── SOCKET.IO ─────────────────────────────────────────────────
+const connectedUsers = {};
+const onlineDeliveryPartners = {};
+const chatMessages = {};
+const deliveryChatMessages = {};
 
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
 
+  // Customer register
   socket.on('register', (phone) => {
     connectedUsers[phone] = socket.id;
-    console.log(`Phone ${phone} registered`);
     if (otpStore[phone] && Date.now() < otpStore[phone].expiresAt) {
       socket.emit('otp_received', {
         otp: otpStore[phone].otp,
@@ -139,81 +141,124 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ✅ Admin register
+  // Admin register
   socket.on('register_admin', () => {
     connectedUsers['admin'] = socket.id;
-    console.log('Admin registered:', socket.id);
-    // Admin को सब active chats भेजो
     socket.emit('all_chats', chatMessages);
+    socket.emit('all_delivery_chats', deliveryChatMessages);
   });
 
-  // ✅ Customer → message भेजो
+  // Customer → Admin chat
   socket.on('customer_message', (data) => {
     const { phone, message, name } = data;
-    if (!chatMessages[phone]) {
-      chatMessages[phone] = { phone, name: name || phone, messages: [] };
-    }
-    const msg = {
-      id: Date.now(),
-      text: message,
-      sender: 'customer',
-      time: new Date().toISOString(),
-    };
+    if (!chatMessages[phone]) chatMessages[phone] = { phone, name: name || phone, messages: [] };
+    const msg = { id: Date.now(), text: message, sender: 'customer', time: new Date().toISOString() };
     chatMessages[phone].messages.push(msg);
-
-    // Admin को notify करो
     const adminSocketId = connectedUsers['admin'];
-    if (adminSocketId) {
-      io.to(adminSocketId).emit('new_customer_message', {
-        phone,
-        name: name || phone,
-        message: msg,
-        allMessages: chatMessages[phone].messages,
-      });
-    }
-
-    // Customer को confirm करो
+    if (adminSocketId) io.to(adminSocketId).emit('new_customer_message', { phone, name: name || phone, message: msg, allMessages: chatMessages[phone].messages });
     socket.emit('message_sent', msg);
   });
 
-  // ✅ Admin → reply भेजो
+  // Admin → Customer reply
   socket.on('admin_reply', (data) => {
     const { phone, message } = data;
-    if (!chatMessages[phone]) {
-      chatMessages[phone] = { phone, messages: [] };
+    if (!chatMessages[phone]) chatMessages[phone] = { phone, messages: [] };
+    const msg = { id: Date.now(), text: message, sender: 'admin', time: new Date().toISOString() };
+    chatMessages[phone].messages.push(msg);
+    const customerSocketId = connectedUsers[phone];
+    if (customerSocketId) io.to(customerSocketId).emit('admin_message', msg);
+    socket.emit('reply_sent', { phone, msg });
+  });
+
+  // Customer chat history
+  socket.on('get_chat_history', (phone) => {
+    socket.emit('chat_history', chatMessages[phone]?.messages || []);
+  });
+
+  // ✅ Delivery Partner register
+  socket.on('delivery_register', (data) => {
+    const { phone, name } = data;
+    connectedUsers[`delivery_${phone}`] = socket.id;
+    onlineDeliveryPartners[phone] = { socketId: socket.id, name, phone, busy: false };
+    console.log(`Delivery partner registered: ${phone}`);
+  });
+
+  // ✅ Delivery Partner → Admin chat
+  socket.on('delivery_message', (data) => {
+    const { phone, name, message, orderId } = data;
+    if (!deliveryChatMessages[phone]) {
+      deliveryChatMessages[phone] = { phone, name: name || phone, messages: [] };
     }
     const msg = {
       id: Date.now(),
       text: message,
-      sender: 'admin',
+      sender: 'delivery',
+      orderId,
       time: new Date().toISOString(),
     };
-    chatMessages[phone].messages.push(msg);
-
-    // Customer को भेजो
-    const customerSocketId = connectedUsers[phone];
-    if (customerSocketId) {
-      io.to(customerSocketId).emit('admin_message', msg);
+    deliveryChatMessages[phone].messages.push(msg);
+    const adminSocketId = connectedUsers['admin'];
+    if (adminSocketId) {
+      io.to(adminSocketId).emit('new_delivery_message', {
+        phone, name: name || phone, message: msg,
+        allMessages: deliveryChatMessages[phone].messages,
+      });
     }
-
-    // Admin को confirm करो
-    socket.emit('reply_sent', { phone, msg });
+    socket.emit('delivery_message_sent', msg);
   });
 
-  // ✅ Chat history request
-  socket.on('get_chat_history', (phone) => {
-    const history = chatMessages[phone]?.messages || [];
-    socket.emit('chat_history', history);
+  // ✅ Admin → Delivery Partner reply
+  socket.on('admin_delivery_reply', (data) => {
+    const { phone, message } = data;
+    if (!deliveryChatMessages[phone]) deliveryChatMessages[phone] = { phone, messages: [] };
+    const msg = { id: Date.now(), text: message, sender: 'admin', time: new Date().toISOString() };
+    deliveryChatMessages[phone].messages.push(msg);
+    const deliverySocketId = connectedUsers[`delivery_${phone}`];
+    if (deliverySocketId) io.to(deliverySocketId).emit('admin_delivery_message', msg);
+    socket.emit('delivery_reply_sent', { phone, msg });
+  });
+
+  // Delivery chat history
+  socket.on('get_delivery_chat_history', (phone) => {
+    socket.emit('delivery_chat_history', deliveryChatMessages[phone]?.messages || []);
+  });
+
+  // Delivery online/offline
+  socket.on('delivery_online', (data) => {
+    const { phone, name } = data;
+    onlineDeliveryPartners[phone] = { socketId: socket.id, name, phone, busy: false };
+  });
+
+  socket.on('delivery_offline', (phone) => {
+    delete onlineDeliveryPartners[phone];
+  });
+
+  socket.on('delivery_busy', (phone) => {
+    if (onlineDeliveryPartners[phone]) onlineDeliveryPartners[phone].busy = true;
+  });
+
+  socket.on('delivery_free', (phone) => {
+    if (onlineDeliveryPartners[phone]) onlineDeliveryPartners[phone].busy = false;
   });
 
   socket.on('disconnect', () => {
     Object.keys(connectedUsers).forEach(key => {
-      if (connectedUsers[key] === socket.id) {
-        delete connectedUsers[key];
-      }
+      if (connectedUsers[key] === socket.id) delete connectedUsers[key];
     });
-    console.log('Socket disconnected:', socket.id);
+    Object.keys(onlineDeliveryPartners).forEach(key => {
+      if (onlineDeliveryPartners[key]?.socketId === socket.id) delete onlineDeliveryPartners[key];
+    });
   });
+});
+
+// ✅ Get Admin/Manager phone
+app.get('/api/admin/phone', async (req, res) => {
+  try {
+    const admin = await Staff.findOne({ role: 'admin' });
+    res.json({ success: true, phone: admin?.phone || null });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // ── HEALTH ───────────────────────────────────────────────────
