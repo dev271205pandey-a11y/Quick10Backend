@@ -73,6 +73,7 @@ const OrderSchema = new mongoose.Schema({
   status: { type: String, default: 'pending' },
   paymentMethod: String,
   deliveryPartner: Object,
+  assignedTo: { type: String, default: null },
 }, { timestamps: true });
 
 const UserSchema = new mongoose.Schema({
@@ -529,23 +530,145 @@ app.put('/api/orders/:id/status', async (req, res) => {
 });
 
 // ── DELIVERY ─────────────────────────────────────────────────
+// ── DELIVERY ─────────────────────────────────────────────────
+
+// Online delivery partners store
+const onlineDeliveryPartners = {}; // phone → { socketId, pushToken, name, busy }
+
+// ✅ Delivery partner online register
+io.on('connection', (socket) => {
+  // ... existing code के अंदर यह add करो
+
+  socket.on('delivery_online', (data) => {
+    const { phone, name, pushToken } = data;
+    onlineDeliveryPartners[phone] = {
+      socketId: socket.id,
+      pushToken,
+      name,
+      phone,
+      busy: false,
+    };
+    console.log(`Delivery partner online: ${phone}`);
+  });
+
+  socket.on('delivery_offline', (phone) => {
+    delete onlineDeliveryPartners[phone];
+    console.log(`Delivery partner offline: ${phone}`);
+  });
+
+  socket.on('delivery_busy', (phone) => {
+    if (onlineDeliveryPartners[phone]) {
+      onlineDeliveryPartners[phone].busy = true;
+    }
+  });
+
+  socket.on('delivery_free', (phone) => {
+    if (onlineDeliveryPartners[phone]) {
+      onlineDeliveryPartners[phone].busy = false;
+    }
+  });
+});
+
+// ✅ Available orders (packed)
 app.get('/api/delivery/available-orders', async (req, res) => {
   try {
-    const orders = await Order.find({ status: 'packed' });
+    const orders = await Order.find({
+      status: 'packed',
+      assignedTo: null,
+    });
     res.json({ success: true, orders });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
+// ✅ Accept order
 app.put('/api/delivery/accept-order', async (req, res) => {
   try {
     const { orderId, deliveryPartner } = req.body;
     const order = await Order.findByIdAndUpdate(
       orderId,
-      { status: 'out_for_delivery', deliveryPartner },
+      {
+        status: 'out_for_delivery',
+        deliveryPartner,
+        assignedTo: deliveryPartner.phone,
+      },
       { new: true }
     );
+
+    // Mark partner as busy
+    if (onlineDeliveryPartners[deliveryPartner.phone]) {
+      onlineDeliveryPartners[deliveryPartner.phone].busy = true;
+    }
+
+    res.json({ success: true, order });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ Reject order → 2 sec में next partner को
+app.put('/api/delivery/reject-order', async (req, res) => {
+  try {
+    const { orderId, rejectedBy } = req.body;
+
+    // Order वापस packed status में
+    await Order.findByIdAndUpdate(orderId, {
+      assignedTo: null,
+      status: 'packed',
+    });
+
+    res.json({ success: true });
+
+    // 2 second बाद next available partner को भेजो
+    setTimeout(async () => {
+      const order = await Order.findById(orderId);
+      if (!order || order.status !== 'packed') return;
+
+      // Available partners (not busy, not the one who rejected)
+      const availablePartners = Object.values(onlineDeliveryPartners).filter(
+        p => !p.busy && p.phone !== rejectedBy
+      );
+
+      if (availablePartners.length > 0) {
+        const nextPartner = availablePartners[0];
+        // Socket से notify करो
+        io.to(nextPartner.socketId).emit('new_order_available', {
+          order,
+          message: 'नया order available है!',
+        });
+      }
+    }, 2000);
+
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ Deliver order
+app.put('/api/delivery/deliver-order', async (req, res) => {
+  try {
+    const { orderId, deliveryPartnerPhone } = req.body;
+    await Order.findByIdAndUpdate(orderId, { status: 'delivered' });
+
+    // Partner free करो
+    if (onlineDeliveryPartners[deliveryPartnerPhone]) {
+      onlineDeliveryPartners[deliveryPartnerPhone].busy = false;
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ My active order
+app.get('/api/delivery/my-order/:phone', async (req, res) => {
+  try {
+    const order = await Order.findOne({
+      assignedTo: req.params.phone,
+      status: 'out_for_delivery',
+    });
     res.json({ success: true, order });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
