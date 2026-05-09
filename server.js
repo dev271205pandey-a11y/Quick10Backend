@@ -1099,11 +1099,7 @@ app.get('/api/home-sections-by-title', async (req, res) => {
     res.json({ success: true, sections: result });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-const SectionSchema = new mongoose.Schema({
-  name:   { type: String, unique: true },
-  active: { type: Boolean, default: true },
-}, { timestamps: true });
-const Section = mongoose.model('Section', SectionSchema);
+
 
 app.get('/api/sections', async (req, res) => {
   try {
