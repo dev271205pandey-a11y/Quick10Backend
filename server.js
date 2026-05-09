@@ -676,7 +676,7 @@ app.put('/api/orders/:id/status', async (req, res) => {
 // ── DELIVERY ─────────────────────────────────────────────────
 
 // Online delivery partners store
-const onlineDeliveryPartners = {}; // phone → { socketId, pushToken, name, busy }
+// removed duplicate
 
 // ✅ Delivery partner online register
 io.on('connection', (socket) => {
