@@ -958,6 +958,104 @@ app.post('/api/payment/verify', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ── MONGODB INDEXES (Performance) ────────────────────────────
+mongoose.connection.once('open', async () => {
+  try {
+    await Product.collection.createIndex({ category: 1 });
+    await Product.collection.createIndex({ subCategory: 1 });
+    await Product.collection.createIndex({ active: 1 });
+    await Product.collection.createIndex({ showOnHome: 1 });
+    await Product.collection.createIndex({ showInFresh: 1 });
+    await Order.collection.createIndex({ userPhone: 1 });
+    await Order.collection.createIndex({ status: 1 });
+    await Order.collection.createIndex({ assignedTo: 1 });
+    console.log('✅ MongoDB Indexes created');
+  } catch (err) {
+    console.log('Index error:', err.message);
+  }
+});
+
+// ── HOME SECTIONS with Pagination ────────────────────────────
+app.get('/api/home-sections', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 0;
+    const limit = parseInt(req.query.limit) || 4;
+
+    const products = await Product.find({ active: true }).lean();
+    const motherCats = await MotherCategory.find({ active: true })
+      .sort({ order: 1 })
+      .skip(page * limit)
+      .limit(limit)
+      .lean();
+
+    const sections = [];
+
+    for (const cat of motherCats) {
+      const catId = cat.categoryId || cat._id.toString();
+      const catProducts = products.filter(p =>
+        p.category === catId || p.category === cat._id.toString()
+      );
+      if (catProducts.length === 0) continue;
+
+      const subCatMap = {};
+      for (const p of catProducts) {
+        const key = p.subCategory || 'general';
+        if (!subCatMap[key]) {
+          subCatMap[key] = {
+            subCategoryId: key,
+            subCategoryName: p.subCategoryName || cat.name,
+            products: [],
+          };
+        }
+        subCatMap[key].products.push(p);
+      }
+
+      sections.push({
+        categoryId: catId,
+        categoryName: cat.name,
+        iconUrl: cat.iconUrl,
+        subSections: Object.values(subCatMap),
+      });
+    }
+
+    res.json({ success: true, sections });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// ── THEME SCHEMA ─────────────────────────────────────────────
+const ThemeSchema = new mongoose.Schema({
+  gradientColors:  { type: Array,   default: ['#B9E6CC', '#F0FBF4', '#FFFFFF'] },
+  backgroundImage: { type: String,  default: null },
+  floatingEmoji:   { type: String,  default: null },
+  isActive:        { type: Boolean, default: true },
+  label:           { type: String,  default: 'Default Theme' },
+}, { timestamps: true });
+const Theme = mongoose.model('Theme', ThemeSchema);
+
+// ── THEME ROUTES ──────────────────────────────────────────────
+app.get('/api/theme', async (req, res) => {
+  try {
+    let theme = await Theme.findOne({});
+    if (!theme) { theme = new Theme({}); await theme.save(); }
+    res.json({ success: true, theme });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/theme', async (req, res) => {
+  try {
+    let theme = await Theme.findOne({});
+    if (!theme) theme = new Theme({});
+    const { gradientColors, backgroundImage, floatingEmoji, isActive, label } = req.body;
+    if (gradientColors)            theme.gradientColors   = gradientColors;
+    if (backgroundImage !== undefined) theme.backgroundImage = backgroundImage;
+    if (floatingEmoji   !== undefined) theme.floatingEmoji   = floatingEmoji;
+    if (isActive        !== undefined) theme.isActive        = isActive;
+    if (label)                     theme.label            = label;
+    await theme.save();
+    res.json({ success: true, theme });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
 
 // ── SERVER START ─────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
