@@ -138,7 +138,7 @@ setInterval(cleanExpiredOTPs, 30 * 1000);
 // ── SOCKET.IO ─────────────────────────────────────────────────
 // ── SOCKET.IO ─────────────────────────────────────────────────
 const connectedUsers = {};
-const onlineDeliveryPartners = {};
+
 const chatMessages = {};
 const deliveryChatMessages = {};
 
@@ -676,7 +676,7 @@ app.put('/api/orders/:id/status', async (req, res) => {
 // ── DELIVERY ─────────────────────────────────────────────────
 
 // Online delivery partners store
-// removed duplicate
+const onlineDeliveryPartners = {}; // phone → { socketId, pushToken, name, busy }
 
 // ✅ Delivery partner online register
 io.on('connection', (socket) => {
@@ -1099,7 +1099,11 @@ app.get('/api/home-sections-by-title', async (req, res) => {
     res.json({ success: true, sections: result });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-
+const SectionSchema = new mongoose.Schema({
+  name:   { type: String, unique: true },
+  active: { type: Boolean, default: true },
+}, { timestamps: true });
+const Section = mongoose.model('Section', SectionSchema);
 
 app.get('/api/sections', async (req, res) => {
   try {
@@ -1137,6 +1141,170 @@ app.get('/api/home-sections-by-title', async (req, res) => {
       }
     }
     res.json({ success: true, sections: result });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+// ── APP CONTROL ───────────────────────────────────────────
+const AppControlSchema = new mongoose.Schema({
+  isOpen:       { type: Boolean, default: true },
+  openTime:     { type: String,  default: '06:00' },
+  closeTime:    { type: String,  default: '22:00' },
+  closedMessage:{ type: String,  default: 'App अभी बंद है। सुबह 6 बजे से फिर चालू होगा।' },
+}, { timestamps: true });
+const AppControl = mongoose.model('AppControl', AppControlSchema);
+
+app.get('/api/app-control', async (req, res) => {
+  try {
+    let ctrl = await AppControl.findOne({});
+    if (!ctrl) { ctrl = new AppControl({}); await ctrl.save(); }
+    res.json({ success: true, control: ctrl });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/app-control', async (req, res) => {
+  try {
+    let ctrl = await AppControl.findOne({});
+    if (!ctrl) ctrl = new AppControl({});
+    const { isOpen, openTime, closeTime, closedMessage } = req.body;
+    if (isOpen        !== undefined) ctrl.isOpen         = isOpen;
+    if (openTime)                    ctrl.openTime        = openTime;
+    if (closeTime)                   ctrl.closeTime       = closeTime;
+    if (closedMessage)               ctrl.closedMessage   = closedMessage;
+    await ctrl.save();
+    res.json({ success: true, control: ctrl });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── PROMO CODES ───────────────────────────────────────────
+const PromoSchema = new mongoose.Schema({
+  code:       { type: String, unique: true, uppercase: true },
+  type:       { type: String, enum: ['percent', 'fixed'], default: 'percent' },
+  value:      { type: Number, default: 10 },
+  minOrder:   { type: Number, default: 0 },
+  maxUses:    { type: Number, default: 100 },
+  usedCount:  { type: Number, default: 0 },
+  active:     { type: Boolean, default: true },
+  expiryDate: { type: Date, default: null },
+}, { timestamps: true });
+const Promo = mongoose.model('Promo', PromoSchema);
+
+app.get('/api/promo-codes', async (req, res) => {
+  try {
+    const promos = await Promo.find({}).sort({ createdAt: -1 });
+    res.json({ success: true, promos });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.post('/api/promo-codes', async (req, res) => {
+  try {
+    const promo = new Promo(req.body);
+    await promo.save();
+    res.json({ success: true, promo });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.post('/api/promo-codes/validate', async (req, res) => {
+  try {
+    const { code, orderAmount } = req.body;
+    const promo = await Promo.findOne({ code: code.toUpperCase(), active: true });
+    if (!promo) return res.json({ success: false, message: 'Invalid coupon code' });
+    if (promo.expiryDate && new Date() > promo.expiryDate)
+      return res.json({ success: false, message: 'Coupon expired हो गया' });
+    if (promo.usedCount >= promo.maxUses)
+      return res.json({ success: false, message: 'Coupon limit पूरी हो गई' });
+    if (orderAmount < promo.minOrder)
+      return res.json({ success: false, message: `Minimum order ₹${promo.minOrder} चाहिए` });
+    const discount = promo.type === 'percent'
+      ? Math.round((orderAmount * promo.value) / 100)
+      : promo.value;
+    res.json({ success: true, promo, discount, message: `₹${discount} की छूट मिली!` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/promo-codes/:id', async (req, res) => {
+  try {
+    const promo = await Promo.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json({ success: true, promo });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.delete('/api/promo-codes/:id', async (req, res) => {
+  try {
+    await Promo.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ATTENDANCE ────────────────────────────────────────────
+const AttendanceSchema = new mongoose.Schema({
+  staffPhone: String,
+  staffName:  String,
+  date:       String,
+  checkIn:    String,
+  checkOut:   String,
+  status:     { type: String, default: 'present' },
+}, { timestamps: true });
+const Attendance = mongoose.model('Attendance', AttendanceSchema);
+
+app.get('/api/attendance', async (req, res) => {
+  try {
+    const { date } = req.query;
+    const filter = date ? { date } : {};
+    const records = await Attendance.find(filter).sort({ createdAt: -1 });
+    res.json({ success: true, records });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.post('/api/attendance', async (req, res) => {
+  try {
+    const record = new Attendance(req.body);
+    await record.save();
+    res.json({ success: true, record });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/attendance/:id', async (req, res) => {
+  try {
+    const record = await Attendance.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json({ success: true, record });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── WEEKLY REPORT ─────────────────────────────────────────
+app.get('/api/reports/weekly', async (req, res) => {
+  try {
+    const now   = new Date();
+    const start = new Date(now);
+    start.setDate(now.getDate() - 7);
+
+    const orders = await Order.find({
+      createdAt: { $gte: start, $lte: now },
+    }).lean();
+
+    const totalOrders    = orders.length;
+    const deliveredOrders= orders.filter(o => o.status === 'delivered');
+    const totalRevenue   = deliveredOrders.reduce((s, o) => s + (o.total || 0), 0);
+    const pendingOrders  = orders.filter(o => o.status === 'pending' || o.status === 'packed').length;
+    const cancelledOrders= orders.filter(o => o.status === 'cancelled').length;
+
+    // Daily breakdown
+    const dailyMap = {};
+    orders.forEach(o => {
+      const day = new Date(o.createdAt).toLocaleDateString('en-IN');
+      if (!dailyMap[day]) dailyMap[day] = { orders: 0, revenue: 0 };
+      dailyMap[day].orders++;
+      if (o.status === 'delivered') dailyMap[day].revenue += (o.total || 0);
+    });
+
+    res.json({
+      success: true,
+      report: {
+        totalOrders, totalRevenue,
+        deliveredOrders: deliveredOrders.length,
+        pendingOrders, cancelledOrders,
+        dailyBreakdown: dailyMap,
+        period: { start, end: now },
+      }
+    });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
