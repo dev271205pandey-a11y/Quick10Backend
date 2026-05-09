@@ -26,16 +26,31 @@ setInterval(() => {
 
 // ── SCHEMAS ──────────────────────────────────────────────────
 
+const SubCategorySchema = new mongoose.Schema({
+  name: String,
+  categoryId: String, // Mother Category से link
+  imageUrl: String,
+  active: { type: Boolean, default: true },
+}, { timestamps: true });
+
+const SubCategory = mongoose.model('SubCategory', SubCategorySchema);
+
 const ProductSchema = new mongoose.Schema({
   name: String,
   price: Number,
   mrp: Number,
   weight: String,
-  category: String,
+  category: String,       // Mother Category ID
+  subCategory: String,    // Sub Category ID
+  subCategoryName: String,
+  categoryName: String,
   imageUrl: String,
   emoji: String,
   stock: { type: Number, default: 100 },
   active: { type: Boolean, default: true },
+  showOnHome: { type: Boolean, default: false },
+  showInFresh: { type: Boolean, default: false },
+  homeSectionTitle: String,
 }, { timestamps: true });
 
 const CategorySchema = new mongoose.Schema({
@@ -522,7 +537,90 @@ app.delete('/api/fresh-categories/:id', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ── SUB CATEGORIES ───────────────────────────────────────────
+app.get('/api/sub-categories', async (req, res) => {
+  try {
+    const { categoryId } = req.query;
+    const filter = { active: true };
+    if (categoryId) filter.categoryId = categoryId;
+    const cats = await SubCategory.find(filter);
+    res.json({ success: true, categories: cats });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
+app.post('/api/sub-categories', async (req, res) => {
+  try {
+    const cat = new SubCategory(req.body);
+    await cat.save();
+    res.json({ success: true, category: cat });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/sub-categories/:id', async (req, res) => {
+  try {
+    const cat = await SubCategory.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json({ success: true, category: cat });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/sub-categories/:id', async (req, res) => {
+  try {
+    await SubCategory.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── HOME SECTIONS (products by category) ─────────────────────
+app.get('/api/home-sections', async (req, res) => {
+  try {
+    // सब active products fetch करो
+    const products = await Product.find({ active: true });
+
+    // Mother categories fetch करो
+    const motherCats = await MotherCategory.find({ active: true });
+
+    // हर category के products group करो
+    const sections = [];
+
+    for (const cat of motherCats) {
+      const catProducts = products.filter(p => p.category === cat.categoryId || p.category === cat._id.toString());
+      if (catProducts.length === 0) continue;
+
+      // Sub-categories के हिसाब से group करो
+      const subCatMap = {};
+      for (const p of catProducts) {
+        const key = p.subCategory || 'general';
+        if (!subCatMap[key]) {
+          subCatMap[key] = {
+            subCategoryId: key,
+            subCategoryName: p.subCategoryName || cat.name,
+            products: [],
+          };
+        }
+        subCatMap[key].products.push(p);
+      }
+
+      sections.push({
+        categoryId: cat.categoryId || cat._id,
+        categoryName: cat.name,
+        iconUrl: cat.iconUrl,
+        subSections: Object.values(subCatMap),
+      });
+    }
+
+    res.json({ success: true, sections });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 // ── ORDERS ───────────────────────────────────────────────────
 app.get('/api/orders', async (req, res) => {
   try {
