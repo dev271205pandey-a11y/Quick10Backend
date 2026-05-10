@@ -58,7 +58,7 @@ const ProductSchema = new mongoose.Schema({
   showInFresh:     { type: Boolean, default: false },
   homeSectionTitle:String,
   discount:        Number,
-}, { timestamps: true });
+}, { timestamps: true, strict: false });
 
 const CategorySchema = new mongoose.Schema({
   name: String,
