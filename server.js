@@ -417,12 +417,13 @@ app.post('/api/products', async (req, res) => {
 
 app.put('/api/products/:id', async (req, res) => {
   try {
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      { $set: req.body },
-      { new: true, strict: false, runValidators: false }
-    );
+    await Product.updateOne({ _id: req.params.id }, { $set: req.body });
+    const product = await Product.findById(req.params.id);
     res.json({ success: true, product });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
