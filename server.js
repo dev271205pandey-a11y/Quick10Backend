@@ -361,16 +361,31 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 // ── PRODUCTS ─────────────────────────────────────────────────
 app.get('/api/products', async (req, res) => {
   try {
-    const { category } = req.query;
+    const { category, freshCategory, allCategory } = req.query;
     const filter = { active: true };
-    if (category && category !== 'all') filter.category = category;
+
+    if (freshCategory && freshCategory !== 'all') {
+      // ✅ freshCategory field से filter करो
+      filter.$or = [
+        { freshCategory: freshCategory },
+        { category:      freshCategory },
+      ];
+    } else if (allCategory && allCategory !== 'all') {
+      // ✅ allCategory field से filter करो
+      filter.$or = [
+        { allCategory: allCategory },
+        { category:    allCategory },
+      ];
+    } else if (category && category !== 'all') {
+      filter.category = category;
+    }
+
     const products = await Product.find(filter);
     res.json({ success: true, products });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 app.get('/api/products/all', async (req, res) => {
   try {
     const products = await Product.find({});
