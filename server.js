@@ -36,21 +36,28 @@ const SubCategorySchema = new mongoose.Schema({
 const SubCategory = mongoose.model('SubCategory', SubCategorySchema);
 
 const ProductSchema = new mongoose.Schema({
-  name: String,
-  price: Number,
-  mrp: Number,
-  weight: String,
-  category: String,       // Mother Category ID
-  subCategory: String,    // Sub Category ID
+  name:            String,
+  price:           Number,
+  mrp:             Number,
+  weight:          String,
+  description:     String,
+  tags:            [String],
+  category:        String,
+  categoryName:    String,
+  // ✅ Multi-category fields
+  motherCategory:  String,
+  allCategory:     String,
+  freshCategory:   String,
+  subCategory:     String,
   subCategoryName: String,
-  categoryName: String,
-  imageUrl: String,
-  emoji: String,
-  stock: { type: Number, default: 100 },
-  active: { type: Boolean, default: true },
-  showOnHome: { type: Boolean, default: false },
-  showInFresh: { type: Boolean, default: false },
-  homeSectionTitle: String,
+  imageUrl:        String,
+  emoji:           String,
+  stock:           { type: Number, default: 100 },
+  active:          { type: Boolean, default: true },
+  showOnHome:      { type: Boolean, default: false },
+  showInFresh:     { type: Boolean, default: false },
+  homeSectionTitle:String,
+  discount:        Number,
 }, { timestamps: true });
 
 const CategorySchema = new mongoose.Schema({
@@ -362,22 +369,25 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 app.get('/api/products', async (req, res) => {
   try {
     const { category, freshCategory, allCategory } = req.query;
-    const filter = { active: true };
+    let filter = { active: true };
 
     if (freshCategory && freshCategory !== 'all') {
-      // ✅ freshCategory field से filter करो
       filter.$or = [
         { freshCategory: freshCategory },
         { category:      freshCategory },
       ];
     } else if (allCategory && allCategory !== 'all') {
-      // ✅ allCategory field से filter करो
       filter.$or = [
         { allCategory: allCategory },
         { category:    allCategory },
       ];
     } else if (category && category !== 'all') {
-      filter.category = category;
+      filter.$or = [
+        { category:       category },
+        { motherCategory: category },
+        { allCategory:    category },
+        { freshCategory:  category },
+      ];
     }
 
     const products = await Product.find(filter);
