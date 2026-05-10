@@ -31,7 +31,7 @@ const SubCategorySchema = new mongoose.Schema({
   categoryId: String, // Mother Category से link
   imageUrl: String,
   active: { type: Boolean, default: true },
-}, { timestamps: true });
+}, { timestamps: true, strict: false });
 
 const SubCategory = mongoose.model('SubCategory', SubCategorySchema);
 
