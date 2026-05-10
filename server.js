@@ -1150,50 +1150,6 @@ app.get('/api/home-sections-by-title', async (req, res) => {
     res.json({ success: true, sections: result });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-const SectionSchema = new mongoose.Schema({
-  name:   { type: String, unique: true },
-  active: { type: Boolean, default: true },
-}, { timestamps: true });
-const Section = mongoose.model('Section', SectionSchema);
-
-app.get('/api/sections', async (req, res) => {
-  try {
-    const sections = await Section.find({ active: true }).sort({ createdAt: -1 });
-    res.json({ success: true, sections });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
-
-app.post('/api/sections', async (req, res) => {
-  try {
-    const { name } = req.body;
-    const section = new Section({ name });
-    await section.save();
-    res.json({ success: true, section });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
-
-app.delete('/api/sections/:id', async (req, res) => {
-  try {
-    await Section.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
-
-app.get('/api/home-sections-by-title', async (req, res) => {
-  try {
-    const sections = await Section.find({ active: true });
-    const result = [];
-    for (const sec of sections) {
-      const products = await Product.find({
-        homeSectionTitle: sec.name, active: true
-      }).lean();
-      if (products.length > 0) {
-        result.push({ sectionId: sec._id, sectionName: sec.name, products });
-      }
-    }
-    res.json({ success: true, sections: result });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
 // ── APP CONTROL ───────────────────────────────────────────
 const AppControlSchema = new mongoose.Schema({
   isOpen:       { type: Boolean, default: true },
