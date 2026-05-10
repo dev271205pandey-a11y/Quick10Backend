@@ -417,17 +417,32 @@ app.post('/api/products', async (req, res) => {
 
 app.put('/api/products/:id', async (req, res) => {
   try {
-    const id = req.params.id;
+    const { id } = req.params;
     const body = req.body;
-    console.log('PUT product:', id, Object.keys(body));
-    const result = await Product.findOneAndUpdate(
-      { _id: id },
+    console.log('PUT /api/products/:id — id:', id);
+    console.log('PUT body keys:', Object.keys(body));
+    console.log('PUT body fields:', {
+      description:    body.description,
+      motherCategory: body.motherCategory,
+      allCategory:    body.allCategory,
+      freshCategory:  body.freshCategory,
+      tags:           body.tags,
+    });
+    const result = await Product.findByIdAndUpdate(
+      id,
       { $set: body },
-      { new: true, strict: false, upsert: false }
+      { new: true, strict: false }
     );
     if (!result) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
+    console.log('PUT saved fields:', {
+      description:    result.description,
+      motherCategory: result.motherCategory,
+      allCategory:    result.allCategory,
+      freshCategory:  result.freshCategory,
+      tags:           result.tags,
+    });
     res.json({ success: true, product: result });
   } catch (err) {
     console.log('PUT error:', err.message);
