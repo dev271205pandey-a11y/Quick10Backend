@@ -1111,6 +1111,7 @@ const ThemeSchema = new mongoose.Schema({
   gradientColors:  { type: Array,   default: ['#B9E6CC', '#F0FBF4', '#FFFFFF'] },
   backgroundImage: { type: String,  default: null },
   floatingEmoji:   { type: String,  default: null },
+  festivalEmoji:   { type: String,  default: null },
   isActive:        { type: Boolean, default: true },
   label:           { type: String,  default: 'Default Theme' },
 }, { timestamps: true });
@@ -1140,22 +1141,42 @@ app.put('/api/theme', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 const SectionSchema = new mongoose.Schema({
-  name:   { type: String, unique: true },
-  active: { type: Boolean, default: true },
-}, { timestamps: true });
+  name:       String,
+  title:      String,
+  titleColor: { type: String, default: '#111111' },
+  categoryId: String,
+  products:   [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+  banners:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'Banner' }],
+  active:     { type: Boolean, default: true },
+}, { timestamps: true, strict: false });
 const Section = mongoose.model('Section', SectionSchema);
+
 app.get('/api/sections', async (req, res) => {
   try {
-    const sections = await Section.find({ active: true }).sort({ createdAt: -1 });
+    const all = req.query.all === 'true';
+    const filter = all ? {} : { active: true };
+    const sections = await Section.find(filter).sort({ createdAt: -1 });
     res.json({ success: true, sections });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.post('/api/sections', async (req, res) => {
   try {
-    const { name } = req.body;
-    const section = new Section({ name });
+    const { name, title, titleColor, categoryId, products, banners, active } = req.body;
+    const section = new Section({ name, title, titleColor, categoryId, products, banners, active });
     await section.save();
+    res.json({ success: true, section });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/sections/:id', async (req, res) => {
+  try {
+    const section = await Section.findByIdAndUpdate(
+      req.params.id,
+      { $set: req.body },
+      { new: true, strict: false }
+    );
+    if (!section) return res.status(404).json({ success: false, message: 'Section not found' });
     res.json({ success: true, section });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
