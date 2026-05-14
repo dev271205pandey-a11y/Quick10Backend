@@ -116,6 +116,18 @@ const StaffSchema = new mongoose.Schema({
   active: { type: Boolean, default: true },
 }, { timestamps: true });
 
+const FeaturedSectionSchema = new mongoose.Schema({
+  title:           String,
+  description:     String,
+  imageUrl:        String,
+  useGradient:     { type: Boolean, default: true },
+  customColor:     String,
+  autoTextColor:   { type: Boolean, default: true },
+  customTextColor: String,
+  products:        [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+  active:          { type: Boolean, default: true },
+}, { timestamps: true });
+
 const Product = mongoose.model('Product', ProductSchema);
 const Category = mongoose.model('Category', CategorySchema);
 const MotherCategory = mongoose.model('MotherCategory', MotherCategorySchema);
@@ -123,6 +135,15 @@ const FreshCategory = mongoose.model('FreshCategory', FreshCategorySchema);
 const Order = mongoose.model('Order', OrderSchema);
 const User = mongoose.model('User', UserSchema);
 const Staff = mongoose.model('Staff', StaffSchema);
+const FeaturedSection = mongoose.model('FeaturedSection', FeaturedSectionSchema);
+
+const BannerSchema = new mongoose.Schema({
+  title:       String,
+  description: String,
+  imageUrl:    String,
+  active:      { type: Boolean, default: true },
+}, { timestamps: true });
+const Banner = mongoose.model('Banner', BannerSchema);
 
 // ── OTP STORE (in-memory, 2 min expiry) ──────────────────────
 const otpStore = {};
@@ -1313,6 +1334,132 @@ app.get('/api/reports/weekly', async (req, res) => {
       }
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/delivery/update-location', async (req, res) => {
+  try {
+    const { orderId, lat, lng, deliveryPartnerPhone } = req.body;
+    const order = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        deliveryPartnerLocation: { lat, lng },
+        updatedAt: new Date()
+      },
+      { new: true, strict: false }
+    );
+    res.json({ success: true, order });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── FEATURED SECTIONS ────────────────────────────────────────
+app.get('/api/featured-section', async (req, res) => {
+  try {
+    const section = await FeaturedSection.findOne({ active: true })
+      .populate('products');
+    res.json({ success: true, section: section || null });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.get('/api/featured-section/all', async (req, res) => {
+  try {
+    const sections = await FeaturedSection.find({})
+      .populate('products')
+      .sort({ createdAt: -1 });
+    res.json({ success: true, sections });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/featured-section', async (req, res) => {
+  try {
+    const { title, description, imageUrl, useGradient, customColor, autoTextColor, customTextColor, products } = req.body;
+    const section = new FeaturedSection({
+      title, description, imageUrl, useGradient, customColor,
+      autoTextColor, customTextColor, products, active: true,
+    });
+    await section.save();
+    res.json({ success: true, section });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/featured-section/:id', async (req, res) => {
+  try {
+    const { title, description, imageUrl, useGradient, customColor, autoTextColor, customTextColor, products, active } = req.body;
+    const section = await FeaturedSection.findByIdAndUpdate(
+      req.params.id,
+      { title, description, imageUrl, useGradient, customColor, autoTextColor, customTextColor, products, active },
+      { new: true, strict: false }
+    ).populate('products');
+    res.json({ success: true, section });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/featured-section/:id', async (req, res) => {
+  try {
+    await FeaturedSection.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Featured section deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/products/:id/featured-toggle', async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    product.inFeaturedSection = !product.inFeaturedSection;
+    await product.save();
+    res.json({ success: true, product });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── BANNERS ──────────────────────────────────────────────────
+app.get('/api/banners', async (req, res) => {
+  try {
+    const banners = await Banner.find({}).sort({ createdAt: -1 });
+    res.json({ success: true, banners });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/banners', async (req, res) => {
+  try {
+    const banner = new Banner(req.body);
+    await banner.save();
+    res.json({ success: true, banner });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/banners/:id', async (req, res) => {
+  try {
+    const banner = await Banner.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!banner) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, banner });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/banners/:id', async (req, res) => {
+  try {
+    await Banner.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // ── SERVER START ─────────────────────────────────────────────
