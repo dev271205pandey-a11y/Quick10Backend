@@ -138,12 +138,23 @@ const Staff = mongoose.model('Staff', StaffSchema);
 const FeaturedSection = mongoose.model('FeaturedSection', FeaturedSectionSchema);
 
 const BannerSchema = new mongoose.Schema({
-  title:       String,
-  description: String,
-  imageUrl:    String,
-  active:      { type: Boolean, default: true },
+  title:         String,
+  subtitle:      String,
+  description:   String,
+  imageUrl:      String,
+  bgColor:       { type: String, default: '' },
+  bannerBgColor: { type: String, default: '' },
+  active:        { type: Boolean, default: true },
 }, { timestamps: true });
 const Banner = mongoose.model('Banner', BannerSchema);
+
+const AppSettingsSchema = new mongoose.Schema({
+  delivery_text:  { type: String, default: 'Delivery in 10 mins' },
+  header_color:   { type: String, default: '#FF6B6B' },
+  app_open:       { type: Boolean, default: true },
+  announcement:   { type: String, default: '' },
+}, { timestamps: true, strict: false });
+const AppSettings = mongoose.model('AppSettings', AppSettingsSchema);
 
 // ── OTP STORE (in-memory, 2 min expiry) ──────────────────────
 const otpStore = {};
@@ -1457,6 +1468,46 @@ app.delete('/api/banners/:id', async (req, res) => {
   try {
     await Banner.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── APP SETTINGS ─────────────────────────────────────────────
+app.get('/api/app-settings', async (req, res) => {
+  try {
+    let settings = await AppSettings.findOne({});
+    if (!settings) {
+      settings = await AppSettings.create({});
+    }
+    res.json({ success: true, settings });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/app-settings', async (req, res) => {
+  try {
+    const settings = await AppSettings.create(req.body);
+    res.json({ success: true, settings });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/app-settings', async (req, res) => {
+  try {
+    let settings = await AppSettings.findOne({});
+    if (!settings) {
+      settings = await AppSettings.create(req.body);
+    } else {
+      settings = await AppSettings.findByIdAndUpdate(
+        settings._id,
+        { $set: req.body },
+        { new: true, strict: false }
+      );
+    }
+    res.json({ success: true, settings });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
