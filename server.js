@@ -27,10 +27,11 @@ setInterval(() => {
 // ── SCHEMAS ──────────────────────────────────────────────────
 
 const SubCategorySchema = new mongoose.Schema({
-  name: String,
-  categoryId: String, // Mother Category से link
-  imageUrl: String,
-  active: { type: Boolean, default: true },
+  name:             String,
+  categoryId:       String,
+  parentCategoryId: String,
+  imageUrl:         String,
+  active:           { type: Boolean, default: true },
 }, { timestamps: true, strict: false });
 
 const SubCategory = mongoose.model('SubCategory', SubCategorySchema);
@@ -48,28 +49,34 @@ const ProductSchema = new mongoose.Schema({
   motherCategory:  String,
   allCategory:     String,
   freshCategory:   String,
-  subCategory:     String,
-  subCategoryName: String,
-  imageUrl:        String,
-  emoji:           String,
-  stock:           { type: Number, default: 100 },
-  active:          { type: Boolean, default: true },
-  showOnHome:      { type: Boolean, default: false },
-  showInFresh:     { type: Boolean, default: false },
-  homeSectionTitle:String,
-  discount:        Number,
+  subCategory:      String,
+  subCategoryName:  String,
+  subCategoryId:    String,
+  section:          String,
+  rating:           { type: Number, default: 0, min: 0, max: 5 },
+  homepagePosition: { type: Number, default: 0 },
+  imageUrl:         String,
+  emoji:            String,
+  stock:            { type: Number, default: 100 },
+  active:           { type: Boolean, default: true },
+  showOnHome:       { type: Boolean, default: false },
+  showInFresh:      { type: Boolean, default: false },
+  homeSectionTitle: String,
+  discount:         Number,
 }, { timestamps: true, strict: false });
 
 const CategorySchema = new mongoose.Schema({
-  name: String,
-  categoryId: { type: String },
-  imageUrl: String,
-  color: String,
-  bg: String,
-  active: { type: Boolean, default: true },
+  name:         String,
+  categoryId:   { type: String },
+  imageUrl:     String,
+  color:        String,
+  bg:           String,
+  active:       { type: Boolean, default: true },
   showInHeader: { type: Boolean, default: false },
-  showInAll: { type: Boolean, default: true },
-}, { timestamps: true });
+  showInAll:    { type: Boolean, default: true },
+  hasImage:     { type: Boolean, default: false },
+  type:         { type: String, default: 'main' },
+}, { timestamps: true, strict: false });
 
 const MotherCategorySchema = new mongoose.Schema({
   name: String,
