@@ -54,6 +54,7 @@ const ProductSchema = new mongoose.Schema({
   subCategoryId:    String,
   section:          String,
   rating:           { type: Number, default: 0, min: 0, max: 5 },
+  reviewCount:      { type: Number, default: 0 },
   homepagePosition: { type: Number, default: 0 },
   imageUrl:         String,
   emoji:            String,
@@ -1539,6 +1540,48 @@ app.put('/api/app-settings', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+});
+
+// ── PROMO SECTION ─────────────────────────────────────────────
+const PromoSectionSchema = new mongoose.Schema({
+  text:            { type: String, default: '' },
+  fontSize:        { type: String, default: 'medium', enum: ['small', 'medium', 'large'] },
+  isBold:          { type: Boolean, default: false },
+  textColor:       { type: String, default: '#FFFFFF' },
+  gifUrl:          { type: String, default: '' },
+  gifAlignment:    { type: String, default: 'center', enum: ['left', 'center', 'right'] },
+  photoUrl:        { type: String, default: '' },
+  headingText:     { type: String, default: '' },
+  headingBold:     { type: Boolean, default: true },
+  descriptionText: { type: String, default: '' },
+  alignment:       { type: String, default: 'center', enum: ['left', 'center', 'right'] },
+  active:          { type: Boolean, default: true },
+}, { timestamps: true });
+const PromoSection = mongoose.model('PromoSection', PromoSectionSchema);
+
+app.get('/api/promo-section', async (req, res) => {
+  try {
+    const promo = await PromoSection.findOne({ active: true }).sort({ createdAt: -1 });
+    res.json({ success: true, promo });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.post('/api/promo-section', async (req, res) => {
+  try {
+    const promo = new PromoSection(req.body);
+    await promo.save();
+    res.json({ success: true, promo });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/promo-section/:id', async (req, res) => {
+  try {
+    const promo = await PromoSection.findByIdAndUpdate(
+      req.params.id, { $set: req.body }, { new: true }
+    );
+    if (!promo) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, promo });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ── SERVER START ─────────────────────────────────────────────
