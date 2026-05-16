@@ -59,6 +59,7 @@ const ProductSchema = new mongoose.Schema({
   imageUrl:         String,
   emoji:            String,
   stock:            { type: Number, default: 100 },
+  deliveryTime:     { type: String, default: '10 mins' },
   active:           { type: Boolean, default: true },
   showOnHome:       { type: Boolean, default: false },
   showInFresh:      { type: Boolean, default: false },
@@ -146,13 +147,23 @@ const Staff = mongoose.model('Staff', StaffSchema);
 const FeaturedSection = mongoose.model('FeaturedSection', FeaturedSectionSchema);
 
 const BannerSchema = new mongoose.Schema({
-  title:         String,
-  subtitle:      String,
-  description:   String,
-  imageUrl:      String,
-  bgColor:       { type: String, default: '' },
-  bannerBgColor: { type: String, default: '' },
-  active:        { type: Boolean, default: true },
+  title:          String,
+  subtitle:       String,
+  description:    String,
+  imageUrl:       String,
+  bgColor:        { type: String, default: '' },
+  bannerBgColor:  { type: String, default: '' },
+  text:           { type: String, default: '' },
+  textColor:      { type: String, default: '#FFFFFF' },
+  textBold:       { type: Boolean, default: false },
+  textSize:       { type: String, default: 'medium', enum: ['small', 'medium', 'large'] },
+  mediaType:      { type: String, default: 'none', enum: ['none', 'image', 'gif', 'png'] },
+  mediaUrl:       { type: String, default: '' },
+  mediaAlignment: { type: String, default: 'center', enum: ['left', 'center', 'right'] },
+  linkType:       { type: String, default: 'none', enum: ['category', 'product', 'none'] },
+  linkId:         { type: String, default: '' },
+  order:          { type: Number, default: 0 },
+  active:         { type: Boolean, default: true },
 }, { timestamps: true });
 const Banner = mongoose.model('Banner', BannerSchema);
 
@@ -1581,6 +1592,47 @@ app.put('/api/promo-section/:id', async (req, res) => {
     );
     if (!promo) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true, promo });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── PREMIUM CATEGORIES ───────────────────────────────────────
+const PremiumCategorySchema = new mongoose.Schema({
+  name:     String,
+  products: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+  imageUrl: { type: String, default: '' },
+  active:   { type: Boolean, default: true },
+}, { timestamps: true });
+const PremiumCategory = mongoose.model('PremiumCategory', PremiumCategorySchema);
+
+app.get('/api/premium-categories', async (req, res) => {
+  try {
+    const cats = await PremiumCategory.find({ active: true }).sort({ createdAt: -1 });
+    res.json({ success: true, categories: cats });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.post('/api/premium-categories', async (req, res) => {
+  try {
+    const cat = new PremiumCategory(req.body);
+    await cat.save();
+    res.json({ success: true, category: cat });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/premium-categories/:id', async (req, res) => {
+  try {
+    const cat = await PremiumCategory.findByIdAndUpdate(
+      req.params.id, { $set: req.body }, { new: true }
+    );
+    if (!cat) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, category: cat });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.delete('/api/premium-categories/:id', async (req, res) => {
+  try {
+    await PremiumCategory.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
