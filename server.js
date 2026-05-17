@@ -463,18 +463,32 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 // ── PRODUCTS ──────────────────────────────────────────────────
 app.get('/api/products', async (req, res) => {
   try {
-    const { category, freshCategory, allCategory, motherCategory, subCategory, section, shopCategory, placement, isBanner, active } = req.query;
+    const {
+      category, freshCategory, allCategory,
+      motherCategory, motherCategoryId,
+      subCategory, section, sectionName,
+      shopCategory, placement, isBanner,
+      showInFresh, inFeaturedSection, showOnHome,
+      active,
+    } = req.query;
+
     let filter = { active: true };
     if (active === 'all') delete filter.active;
 
-    if (isBanner === 'true')  filter.isBanner  = true;
-    if (placement)            filter.placement  = placement;
-    if (shopCategory)         filter.shopCategoryId = shopCategory;
+    if (isBanner === 'true')           filter.isBanner          = true;
+    if (showInFresh === 'true')        filter.showInFresh        = true;
+    if (inFeaturedSection === 'true')  filter.inFeaturedSection  = true;
+    if (showOnHome === 'true')         filter.showOnHome         = true;
+    if (sectionName)                   filter.sectionName        = sectionName;
+    if (placement)                     filter.placement          = placement;
+    if (shopCategory)                  filter.shopCategoryId     = shopCategory;
 
     if (section) {
       filter.$or = [{ sectionId: section }, { section }];
     } else if (subCategory) {
       filter.$or = [{ subCategoryId: subCategory }, { subCategory }];
+    } else if (motherCategoryId) {
+      filter.$or = [{ motherCategoryId }, { motherCategory: motherCategoryId }];
     } else if (motherCategory) {
       filter.$or = [{ motherCategoryId: motherCategory }, { motherCategory }, { category: motherCategory }];
     } else if (freshCategory && freshCategory !== 'all') {
