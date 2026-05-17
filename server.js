@@ -587,7 +587,7 @@ app.post('/api/mother-categories', async (req, res) => {
 });
 app.put('/api/mother-categories/:id', async (req, res) => {
   try {
-    const c = await MotherCategory.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const c = await MotherCategory.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true, strict: false });
     if (!c) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true, category: c });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -643,8 +643,10 @@ app.post('/api/sub-categories', async (req, res) => {
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.put('/api/sub-categories/:id', async (req, res) => {
-  try { const c = await SubCategory.findByIdAndUpdate(req.params.id, req.body, { new: true }); res.json({ success: true, category: c }); }
-  catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  try {
+    const c = await SubCategory.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true, strict: false });
+    res.json({ success: true, category: c });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.delete('/api/sub-categories/:id', async (req, res) => {
   try { await SubCategory.findByIdAndDelete(req.params.id); res.json({ success: true }); }
