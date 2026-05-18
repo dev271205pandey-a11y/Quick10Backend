@@ -98,6 +98,8 @@ const MotherCategorySchema = new mongoose.Schema({
   name:         String,
   categoryId:   { type: String, unique: true },
   iconUrl:      String,
+  color:        String,
+  bg:           String,
   active:       { type: Boolean, default: true },
   order:        { type: Number, default: 0 },
   position:     { type: Number, default: 0 },
