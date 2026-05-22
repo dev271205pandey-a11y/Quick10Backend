@@ -227,6 +227,18 @@ const AppSettingsSchema = new mongoose.Schema({
   forcedUpdate:      { type: Boolean, default: false },
   maintenanceMode:   { type: Boolean, default: false },
   appVersion:        { type: String,  default: '1.0.0' },
+  pageThemes:        {
+    type: Object,
+    default: {
+      home:           ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8'],
+      cart:           ['#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#A9DFBF'],
+      category:       ['#F1948A', '#D7BDE2', '#A3E4D7', '#F4D03F', '#E59866'],
+      fresh:          ['#6BCB77', '#4D96FF', '#FF6B6B', '#4ECDC4', '#45B7D1'],
+      motherCategory: ['#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'],
+      search:         ['#F8B88B', '#A9DFBF', '#F1948A', '#D7BDE2', '#A3E4D7'],
+      profile:        ['#F4D03F', '#E59866', '#FF6B6B', '#4ECDC4', '#45B7D1'],
+    },
+  },
 }, { timestamps: true, strict: false });
 
 const ThemeSchema = new mongoose.Schema({
