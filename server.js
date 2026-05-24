@@ -362,6 +362,11 @@ const chatMessages           = {};
 const deliveryChatMessages   = {};
 
 io.on('connection', (socket) => {
+  // Customer joins their personal room for order updates
+  socket.on('join_room', (room) => {
+    socket.join(room);
+  });
+
   socket.on('register', (phone) => {
     connectedUsers[phone] = socket.id;
     if (otpStore[phone] && Date.now() < otpStore[phone].expiresAt)
@@ -822,6 +827,7 @@ app.put('/api/orders/:id/assign', async (req, res) => {
     const { assignedTo, assignedName } = req.body;
     const order = await Order.findByIdAndUpdate(req.params.id, { status: 'packing', assignedTo, assignedName, accepted_at: new Date() }, { new: true });
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -829,6 +835,7 @@ app.put('/api/orders/:id/packed', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(req.params.id, { status: 'packed', packed_at: new Date() }, { new: true });
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -836,6 +843,7 @@ app.put('/api/orders/:id/dispatched', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(req.params.id, { status: 'out_for_delivery', dispatched_at: new Date() }, { new: true });
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -843,6 +851,7 @@ app.put('/api/orders/:id/delivered', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(req.params.id, { status: 'delivered', delivered_at: new Date() }, { new: true });
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -859,6 +868,8 @@ app.put('/api/orders/:id/status', async (req, res) => {
     if (status === 'out_for_delivery') upd.dispatched_at = now;
     if (status === 'delivered')        upd.delivered_at  = now;
     const order = await Order.findByIdAndUpdate(req.params.id, upd, { new: true });
+    // Notify customer in real-time
+    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
