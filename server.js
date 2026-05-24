@@ -482,7 +482,7 @@ app.get('/api/products', async (req, res) => {
     const {
       category, freshCategory, allCategory,
       motherCategory, motherCategoryId,
-      subCategory, section, sectionName,
+      subCategory, subCategoryId, section, sectionName,
       shopCategory, placement, isBanner,
       showInFresh, inFeaturedSection, showOnHome,
       freshCategoryId, freshCategoryName,
@@ -504,8 +504,9 @@ app.get('/api/products', async (req, res) => {
 
     if (section) {
       filter.$or = [{ sectionId: section }, { section }];
-    } else if (subCategory) {
-      filter.$or = [{ subCategoryId: subCategory }, { subCategory }];
+    } else if (subCategoryId || subCategory) {
+      const subId = subCategoryId || subCategory;
+      filter.$or = [{ subCategoryId: subId }, { subCategory: subId }];
     } else if (motherCategoryId) {
       filter.$or = [{ motherCategoryId }, { motherCategory: motherCategoryId }];
     } else if (motherCategory) {
