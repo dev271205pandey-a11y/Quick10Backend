@@ -35,6 +35,7 @@ const SubCategorySchema = new mongoose.Schema({
   parentCategoryId:   String,
   motherCategoryId:   String,
   motherCategoryName: String,
+  image:              String,
   imageUrl:           String,
   position:           { type: Number, default: 0 },
   active:             { type: Boolean, default: true },
@@ -1309,7 +1310,7 @@ app.get('/api/mother-categories/:id/full', async (req, res) => {
     const catId = category.categoryId || id;
     const [subCategories, products] = await Promise.all([
       SubCategory.find({ $or: [{ motherCategoryId: id }, { motherCategoryId: catId }], active: true })
-        .select('_id name imageUrl position')
+        .select('_id name image imageUrl categoryId position active')
         .sort({ position: 1 }),
       Product.find({ $or: [{ motherCategoryId: id }, { motherCategoryId: catId }, { motherCategory: catId }], active: true })
         .select('_id name price mrp weight imageUrl stock active subCategoryId subCategoryName discount rating'),
