@@ -271,9 +271,10 @@ const ShopCategorySchema = new mongoose.Schema({
   shopCategoryId:   String,
   imageUrl:         String,
   motherCategoryId: String,
+  section:          { type: String, default: 'Other' },
   position:         { type: Number, default: 0 },
   active:           { type: Boolean, default: true },
-}, { timestamps: true });
+}, { timestamps: true, strict: false });
 
 const AppControlSchema = new mongoose.Schema({
   isOpen:        { type: Boolean, default: true },
