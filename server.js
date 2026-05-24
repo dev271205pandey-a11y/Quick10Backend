@@ -54,6 +54,8 @@ const ProductSchema = new mongoose.Schema({
   motherCategoryName: String,
   allCategory:        String,
   freshCategory:      String,
+  freshCategoryId:    String,
+  freshCategoryName:  String,
   subCategory:        String,
   subCategoryName:    String,
   subCategoryId:      String,
@@ -483,6 +485,7 @@ app.get('/api/products', async (req, res) => {
       subCategory, section, sectionName,
       shopCategory, placement, isBanner,
       showInFresh, inFeaturedSection, showOnHome,
+      freshCategoryId, freshCategoryName,
       active,
     } = req.query;
 
@@ -496,6 +499,8 @@ app.get('/api/products', async (req, res) => {
     if (sectionName)                   filter.sectionName        = sectionName;
     if (placement)                     filter.placement          = placement;
     if (shopCategory)                  filter.shopCategoryId     = shopCategory;
+    if (freshCategoryId)               filter.freshCategoryId    = freshCategoryId;
+    if (freshCategoryName)             filter.freshCategoryName  = freshCategoryName;
 
     if (section) {
       filter.$or = [{ sectionId: section }, { section }];
