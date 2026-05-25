@@ -122,7 +122,7 @@ const OrderSchema = new mongoose.Schema({
   items:               Array,
   total:               Number,
   address:             Object,
-  status:              { type: String, default: 'pending' },
+  status:              { type: String, default: 'pending', enum: ['pending', 'packing', 'ready_pickup', 'dispatched', 'delivered', 'cancelled'] },
   paymentMethod:       String,
   deliveryPartner:     Object,
   assignedTo:          { type: String, default: null },
@@ -133,8 +133,9 @@ const OrderSchema = new mongoose.Schema({
   delivered_at:        Date,
   pickerId:            String,
   pickerName:          String,
-  deliveryPartnerId:   String,
-  deliveryPartnerName: String,
+  deliveryPartnerId:    String,
+  deliveryPartnerName:  String,
+  deliveryPartnerPhone: String,
   rejectedBy:          { type: [String], default: [] },
   pickerAcceptedAt:    Date,
   dispatchedAt:        Date,
@@ -875,7 +876,7 @@ app.put('/api/orders/:id/accept-packing', async (req, res) => {
     const { pickerId, pickerName } = req.body;
     const order = await Order.findByIdAndUpdate(
       req.params.id,
-      { status: 'accepted', pickerId, pickerName, pickerAcceptedAt: new Date() },
+      { status: 'packing', pickerId, pickerName, pickerAcceptedAt: new Date() },
       { new: true }
     );
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
