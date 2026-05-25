@@ -556,11 +556,35 @@ app.get('/api/products', async (req, res) => {
     if (showOnHome === 'true')         filter.showOnHome         = true;
     if (sectionName)                   filter.sectionName        = sectionName;
     if (placement)                     filter.placement          = placement;
-    if (shopCategory)                  filter.shopCategoryId     = shopCategory;
-    if (shopCategoryId)                filter.shopCategoryId     = shopCategoryId;
-    if (shopCategoryName)              filter.shopCategoryName   = shopCategoryName;
     if (freshCategoryId)               filter.freshCategoryId    = freshCategoryId;
     if (freshCategoryName)             filter.freshCategoryName  = freshCategoryName;
+
+    const shopCatQuery = shopCategoryId || shopCategory;
+    if (shopCatQuery || shopCategoryName) {
+      let isValid = false;
+      try { isValid = mongoose.Types.ObjectId.isValid(shopCatQuery); } catch (_) {}
+      const shopCat = shopCatQuery
+        ? await ShopCategory.findOne({
+            $or: [
+              ...(isValid ? [{ _id: shopCatQuery }] : []),
+              { shopCategoryId: shopCatQuery },
+            ],
+          })
+        : null;
+
+      if (shopCat) {
+        filter.$or = [
+          { shopCategoryId: shopCat._id.toString() },
+          { shopCategoryId: shopCat.shopCategoryId },
+          { shopCategoryName: shopCat.name },
+        ];
+      } else {
+        filter.$or = [
+          { shopCategoryId: shopCatQuery || shopCategoryName },
+          { shopCategoryName: shopCatQuery || shopCategoryName },
+        ];
+      }
+    }
 
     if (section) {
       filter.$or = [{ sectionId: section }, { section }];
