@@ -117,20 +117,34 @@ const FreshCategorySchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const OrderSchema = new mongoose.Schema({
-  orderId:         String,
-  userPhone:       String,
-  items:           Array,
-  total:           Number,
-  address:         Object,
-  status:          { type: String, default: 'pending' },
-  paymentMethod:   String,
-  deliveryPartner: Object,
-  assignedTo:      { type: String, default: null },
-  assignedName:    String,
-  accepted_at:     Date,
-  packed_at:       Date,
-  dispatched_at:   Date,
-  delivered_at:    Date,
+  orderId:             String,
+  userPhone:           String,
+  items:               Array,
+  total:               Number,
+  address:             Object,
+  status:              { type: String, default: 'pending' },
+  paymentMethod:       String,
+  deliveryPartner:     Object,
+  assignedTo:          { type: String, default: null },
+  assignedName:        String,
+  accepted_at:         Date,
+  packed_at:           Date,
+  dispatched_at:       Date,
+  delivered_at:        Date,
+  pickerId:            String,
+  pickerName:          String,
+  deliveryPartnerId:   String,
+  deliveryPartnerName: String,
+  rejectedBy:          { type: [String], default: [] },
+  pickerAcceptedAt:    Date,
+  dispatchedAt:        Date,
+  deliveredAt:         Date,
+  earningAmount:       { type: Number, default: 30 },
+  currentLocation:     {
+    lat:       Number,
+    lng:       Number,
+    updatedAt: Date,
+  },
 }, { timestamps: true });
 
 const UserSchema = new mongoose.Schema({
@@ -141,22 +155,33 @@ const UserSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const StaffSchema = new mongoose.Schema({
-  name:          String,
-  phone:         { type: String, unique: true, sparse: true },
-  mobile:        String,
-  password:      String,
-  role:          { type: String, default: 'Picker' },
-  staffId:       String,
-  profilePhoto:  String,
-  available:     { type: Boolean, default: false },
-  vehicleType:   String,
-  vehicleNumber: String,
-  aadhaar:       String,
-  bankAccount:   String,
-  accountNo:     String,
-  ifsc:          String,
-  bankName:      String,
-  active:        { type: Boolean, default: true },
+  name:               String,
+  phone:              { type: String, unique: true, sparse: true },
+  mobile:             String,
+  password:           String,
+  role:               { type: String, default: 'Picker' },
+  staffId:            String,
+  profilePhoto:       String,
+  available:          { type: Boolean, default: false },
+  isAvailable:        { type: Boolean, default: true },
+  vehicleType:        String,
+  vehicleNumber:      String,
+  aadhaar:            String,
+  aadhaarNumber:      String,
+  aadhaarImage:       String,
+  panNumber:          String,
+  panImage:           String,
+  bankAccount:        String,
+  accountNo:          String,
+  ifsc:               String,
+  bankIfsc:           String,
+  bankName:           String,
+  bankPassbookImage:  String,
+  totalOrdersHandled: { type: Number, default: 0 },
+  totalEarnings:      { type: Number, default: 0 },
+  currentOrderId:     String,
+  active:             { type: Boolean, default: true },
+  isActive:           { type: Boolean, default: true },
 }, { timestamps: true });
 
 const PayoutSchema = new mongoose.Schema({
@@ -271,10 +296,9 @@ const ShopCategorySchema = new mongoose.Schema({
   shopCategoryId:   String,
   imageUrl:         String,
   motherCategoryId: String,
-  section:          { type: String, default: 'Other' },
   position:         { type: Number, default: 0 },
   active:           { type: Boolean, default: true },
-}, { timestamps: true, strict: false });
+}, { timestamps: true });
 
 const AppControlSchema = new mongoose.Schema({
   isOpen:        { type: Boolean, default: true },
@@ -326,26 +350,26 @@ const PremiumCategorySchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // ── MODELS ───────────────────────────────────────────────────
-const SubCategory    = mongoose.model('SubCategory',    SubCategorySchema);
-const Product        = mongoose.model('Product',        ProductSchema);
-const Category       = mongoose.model('Category',       CategorySchema);
-const MotherCategory = mongoose.model('MotherCategory', MotherCategorySchema);
-const FreshCategory  = mongoose.model('FreshCategory',  FreshCategorySchema);
-const Order          = mongoose.model('Order',          OrderSchema);
-const User           = mongoose.model('User',           UserSchema);
-const Staff          = mongoose.model('Staff',          StaffSchema);
-const Payout         = mongoose.model('Payout',         PayoutSchema);
-const FeaturedSection= mongoose.model('FeaturedSection',FeaturedSectionSchema);
-const Banner         = mongoose.model('Banner',         BannerSchema);
-const AppSettings    = mongoose.model('AppSettings',    AppSettingsSchema);
-const Theme          = mongoose.model('Theme',          ThemeSchema);
-const Section        = mongoose.model('Section',        SectionSchema);
-const ShopCategory   = mongoose.model('ShopCategory',   ShopCategorySchema);
-const AppControl     = mongoose.model('AppControl',     AppControlSchema);
-const Promo          = mongoose.model('Promo',          PromoSchema);
-const Attendance     = mongoose.model('Attendance',     AttendanceSchema);
-const PromoSection   = mongoose.model('PromoSection',   PromoSectionSchema);
-const PremiumCategory= mongoose.model('PremiumCategory',PremiumCategorySchema);
+const SubCategory     = mongoose.model('SubCategory',     SubCategorySchema);
+const Product         = mongoose.model('Product',         ProductSchema);
+const Category        = mongoose.model('Category',        CategorySchema);
+const MotherCategory  = mongoose.model('MotherCategory',  MotherCategorySchema);
+const FreshCategory   = mongoose.model('FreshCategory',   FreshCategorySchema);
+const Order           = mongoose.model('Order',           OrderSchema);
+const User            = mongoose.model('User',            UserSchema);
+const Staff           = mongoose.model('Staff',           StaffSchema);
+const Payout          = mongoose.model('Payout',          PayoutSchema);
+const FeaturedSection = mongoose.model('FeaturedSection', FeaturedSectionSchema);
+const Banner          = mongoose.model('Banner',          BannerSchema);
+const AppSettings     = mongoose.model('AppSettings',     AppSettingsSchema);
+const Theme           = mongoose.model('Theme',           ThemeSchema);
+const Section         = mongoose.model('Section',         SectionSchema);
+const ShopCategory    = mongoose.model('ShopCategory',    ShopCategorySchema);
+const AppControl      = mongoose.model('AppControl',      AppControlSchema);
+const Promo           = mongoose.model('Promo',           PromoSchema);
+const Attendance      = mongoose.model('Attendance',      AttendanceSchema);
+const PromoSection    = mongoose.model('PromoSection',    PromoSectionSchema);
+const PremiumCategory = mongoose.model('PremiumCategory', PremiumCategorySchema);
 
 // ── OTP STORE ─────────────────────────────────────────────────
 const otpStore = {};
@@ -361,20 +385,33 @@ const onlineDeliveryPartners = {};
 const chatMessages           = {};
 const deliveryChatMessages   = {};
 
+const emitOrderUpdate = (order) => {
+  if (!order) return;
+  io.to('customer_' + order.userPhone).emit('order_update', order);
+  io.to('warehouse_admin').emit('order_update', order);
+  if (order.deliveryPartnerId) {
+    io.to('delivery_' + order.deliveryPartnerId).emit('order_update', order);
+  }
+};
+
 io.on('connection', (socket) => {
-  // Customer joins their personal room for order updates
+  console.log('Connected:', socket.id);
+
   socket.on('join_room', (room) => {
     socket.join(room);
+    console.log(socket.id, 'joined', room);
   });
 
   socket.on('register', (phone) => {
     connectedUsers[phone] = socket.id;
+    socket.join('customer_' + phone);
     if (otpStore[phone] && Date.now() < otpStore[phone].expiresAt)
       socket.emit('otp_received', { otp: otpStore[phone].otp, message: `Quick10 OTP: ${otpStore[phone].otp}` });
   });
 
   socket.on('register_admin', () => {
     connectedUsers['admin'] = socket.id;
+    socket.join('warehouse_admin');
     socket.emit('all_chats', chatMessages);
     socket.emit('all_delivery_chats', deliveryChatMessages);
   });
@@ -405,6 +442,8 @@ io.on('connection', (socket) => {
     const { phone, name } = data;
     connectedUsers[`delivery_${phone}`] = socket.id;
     onlineDeliveryPartners[phone] = { socketId: socket.id, name, phone, busy: false };
+    socket.join('delivery_available');
+    socket.join('delivery_' + phone);
   });
 
   socket.on('delivery_message', (data) => {
@@ -428,12 +467,19 @@ io.on('connection', (socket) => {
   });
 
   socket.on('get_delivery_chat_history', (phone) => socket.emit('delivery_chat_history', deliveryChatMessages[phone]?.messages || []));
-  socket.on('delivery_online',  (data) => { const { phone, name, pushToken } = data; onlineDeliveryPartners[phone] = { socketId: socket.id, pushToken, name, phone, busy: false }; });
+
+  socket.on('delivery_online', (data) => {
+    const { phone, name, pushToken } = data;
+    onlineDeliveryPartners[phone] = { socketId: socket.id, pushToken, name, phone, busy: false };
+    socket.join('delivery_available');
+    socket.join('delivery_' + phone);
+  });
   socket.on('delivery_offline', (phone) => { delete onlineDeliveryPartners[phone]; });
   socket.on('delivery_busy',    (phone) => { if (onlineDeliveryPartners[phone]) onlineDeliveryPartners[phone].busy = true; });
   socket.on('delivery_free',    (phone) => { if (onlineDeliveryPartners[phone]) onlineDeliveryPartners[phone].busy = false; });
 
   socket.on('disconnect', () => {
+    console.log('Disconnected:', socket.id);
     Object.keys(connectedUsers).forEach(k => { if (connectedUsers[k] === socket.id) delete connectedUsers[k]; });
     Object.keys(onlineDeliveryPartners).forEach(k => { if (onlineDeliveryPartners[k]?.socketId === socket.id) delete onlineDeliveryPartners[k]; });
   });
@@ -808,6 +854,7 @@ app.post('/api/orders', async (req, res) => {
   try {
     const order = new Order({ ...req.body, orderId: 'ORD' + Date.now() });
     await order.save();
+    io.to('warehouse_admin').emit('new_order', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -822,12 +869,163 @@ app.get('/api/orders/:id', async (req, res) => {
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Picker accepts order → status: accepted
+app.put('/api/orders/:id/accept-packing', async (req, res) => {
+  try {
+    const { pickerId, pickerName } = req.body;
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { status: 'accepted', pickerId, pickerName, pickerAcceptedAt: new Date() },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    emitOrderUpdate(order);
+    io.to('delivery_available').emit('order_accepted', { orderId: order._id });
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Picker done packing → status: ready_pickup
+app.put('/api/orders/:id/ready-pickup', async (req, res) => {
+  try {
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { status: 'ready_pickup', packed_at: new Date() },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    emitOrderUpdate(order);
+    io.to('delivery_available').emit('order_ready', { order, message: 'Order ready for pickup!' });
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Delivery partner dispatches → status: dispatched
+app.put('/api/orders/:id/dispatch', async (req, res) => {
+  try {
+    const { deliveryPartnerId } = req.body;
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { status: 'dispatched', dispatched_at: new Date(), dispatchedAt: new Date(), deliveryPartnerId },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    emitOrderUpdate(order);
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Delivery partner delivered → status: delivered
+app.put('/api/orders/:id/deliver', async (req, res) => {
+  try {
+    const { deliveryPartnerId } = req.body;
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { status: 'delivered', delivered_at: new Date(), deliveredAt: new Date() },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    emitOrderUpdate(order);
+    if (deliveryPartnerId) {
+      await Staff.findByIdAndUpdate(deliveryPartnerId, {
+        $inc: { totalOrdersHandled: 1, totalEarnings: order.earningAmount || 30 },
+        currentOrderId: null,
+      });
+      if (onlineDeliveryPartners[deliveryPartnerId]) onlineDeliveryPartners[deliveryPartnerId].busy = false;
+    }
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Notify all available delivery partners
+app.put('/api/orders/:id/notify-partners', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    io.to('delivery_available').emit('new_order_available', { order, message: 'New order available!' });
+    res.json({ success: true, message: 'Partners notified' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Delivery partner accepts delivery
+app.put('/api/orders/:id/accept-delivery', async (req, res) => {
+  try {
+    const { deliveryPartnerId, partnerName } = req.body;
+    const existing = await Order.findById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Not found' });
+    if (existing.deliveryPartnerId && existing.deliveryPartnerId !== deliveryPartnerId) {
+      return res.json({ success: false, message: 'Order already taken by another partner' });
+    }
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { deliveryPartnerId, deliveryPartnerName: partnerName, assignedTo: deliveryPartnerId, assignedName: partnerName },
+      { new: true }
+    );
+    emitOrderUpdate(order);
+    if (onlineDeliveryPartners[deliveryPartnerId]) onlineDeliveryPartners[deliveryPartnerId].busy = true;
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Delivery partner rejects delivery
+app.put('/api/orders/:id/reject-delivery', async (req, res) => {
+  try {
+    const { deliveryPartnerId } = req.body;
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { $addToSet: { rejectedBy: deliveryPartnerId } },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    const available = Object.values(onlineDeliveryPartners).filter(
+      p => !p.busy && p.phone !== deliveryPartnerId && !order.rejectedBy.includes(p.phone)
+    );
+    if (available.length > 0) {
+      io.to('delivery_' + available[0].phone).emit('new_order_available', { order, message: 'New order available!' });
+    } else {
+      io.to('warehouse_admin').emit('all_partners_rejected', { order, message: 'Sabne reject kar diya, manually assign karo' });
+    }
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Admin manually assigns delivery partner
+app.put('/api/orders/:id/assign-partner', async (req, res) => {
+  try {
+    const { deliveryPartnerId, partnerName } = req.body;
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { deliveryPartnerId, deliveryPartnerName: partnerName, assignedTo: deliveryPartnerId, assignedName: partnerName },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    io.to('delivery_' + deliveryPartnerId).emit('order_assigned', { order, message: 'Tumhe order assign hua hai' });
+    emitOrderUpdate(order);
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Location update
+app.put('/api/orders/:id/location', async (req, res) => {
+  try {
+    const { lat, lng } = req.body;
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { currentLocation: { lat, lng, updatedAt: new Date() } },
+      { new: true, strict: false }
+    );
+    if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+    io.to('customer_' + order.userPhone).emit('location_update', { lat, lng, orderId: req.params.id });
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 app.put('/api/orders/:id/assign', async (req, res) => {
   try {
     const { assignedTo, assignedName } = req.body;
     const order = await Order.findByIdAndUpdate(req.params.id, { status: 'packing', assignedTo, assignedName, accepted_at: new Date() }, { new: true });
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
-    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
+    emitOrderUpdate(order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -835,7 +1033,7 @@ app.put('/api/orders/:id/packed', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(req.params.id, { status: 'packed', packed_at: new Date() }, { new: true });
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
-    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
+    emitOrderUpdate(order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -843,7 +1041,7 @@ app.put('/api/orders/:id/dispatched', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(req.params.id, { status: 'out_for_delivery', dispatched_at: new Date() }, { new: true });
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
-    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
+    emitOrderUpdate(order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -851,7 +1049,7 @@ app.put('/api/orders/:id/delivered', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(req.params.id, { status: 'delivered', delivered_at: new Date() }, { new: true });
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
-    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
+    emitOrderUpdate(order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -868,8 +1066,7 @@ app.put('/api/orders/:id/status', async (req, res) => {
     if (status === 'out_for_delivery') upd.dispatched_at = now;
     if (status === 'delivered')        upd.delivered_at  = now;
     const order = await Order.findByIdAndUpdate(req.params.id, upd, { new: true });
-    // Notify customer in real-time
-    if (order?.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
+    emitOrderUpdate(order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -886,6 +1083,7 @@ app.put('/api/delivery/accept-order', async (req, res) => {
     const { orderId, deliveryPartner } = req.body;
     const order = await Order.findByIdAndUpdate(orderId, { status: 'out_for_delivery', deliveryPartner, assignedTo: deliveryPartner.phone, dispatched_at: new Date() }, { new: true });
     if (onlineDeliveryPartners[deliveryPartner.phone]) onlineDeliveryPartners[deliveryPartner.phone].busy = true;
+    emitOrderUpdate(order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -919,7 +1117,8 @@ app.get('/api/delivery/my-order/:phone', async (req, res) => {
 app.put('/api/delivery/update-location', async (req, res) => {
   try {
     const { orderId, lat, lng } = req.body;
-    const order = await Order.findByIdAndUpdate(orderId, { deliveryPartnerLocation: { lat, lng } }, { new: true, strict: false });
+    const order = await Order.findByIdAndUpdate(orderId, { currentLocation: { lat, lng, updatedAt: new Date() } }, { new: true, strict: false });
+    if (order) io.to('customer_' + order.userPhone).emit('location_update', { lat, lng, orderId });
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -960,7 +1159,7 @@ app.delete('/api/users/:phone/addresses/:addressId', async (req, res) => {
 // ── STAFF ─────────────────────────────────────────────────────
 const generateStaffId = async (role) => {
   const prefix = ['Manager','manager'].includes(role) ? 'WH_MGR'
-               : ['Rider','rider'].includes(role)     ? 'WH_RDR'
+               : ['Rider','rider','delivery_partner'].includes(role) ? 'WH_RDR'
                : 'WH_PKR';
   const count = await Staff.countDocuments({ role });
   return `${prefix}_${String(count + 1).padStart(3, '0')}`;
@@ -1001,7 +1200,7 @@ app.delete('/api/staff/:id', async (req, res) => {
 });
 app.put('/api/staff/:id/availability', async (req, res) => {
   try {
-    const staff = await Staff.findByIdAndUpdate(req.params.id, { available: req.body.available }, { new: true });
+    const staff = await Staff.findByIdAndUpdate(req.params.id, { available: req.body.available, isAvailable: req.body.available }, { new: true });
     if (!staff) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true, staff });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -1011,6 +1210,26 @@ app.post('/api/staff/login', async (req, res) => {
     const { phone, password } = req.body;
     const staff = await Staff.findOne({ $or: [{ phone }, { mobile: phone }], password, active: true });
     if (!staff) return res.json({ success: false, message: 'Phone ya password galat hai' });
+    res.json({ success: true, staff });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.get('/api/staff/:id/earnings', async (req, res) => {
+  try {
+    const staff = await Staff.findById(req.params.id);
+    if (!staff) return res.status(404).json({ success: false, message: 'Not found' });
+    const orders = await Order.find({ deliveryPartnerId: req.params.id, status: 'delivered' }).sort({ createdAt: -1 });
+    res.json({ success: true, totalEarnings: staff.totalEarnings, totalOrdersHandled: staff.totalOrdersHandled, orders });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.put('/api/staff/:id/add-earning', async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const staff = await Staff.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { totalEarnings: amount, totalOrdersHandled: 1 } },
+      { new: true }
+    );
+    if (!staff) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true, staff });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1047,7 +1266,7 @@ app.put('/api/finance/payout/:id', async (req, res) => {
 app.get('/api/finance/summary', async (req, res) => {
   try {
     const today  = new Date().toLocaleDateString('en-CA');
-    const riders = await Staff.find({ role: { $in: ['Rider', 'rider'] } });
+    const riders = await Staff.find({ role: { $in: ['Rider', 'rider', 'delivery_partner'] } });
     const todayPayouts = await Payout.find({ date: today });
     const settings = await AppSettings.findOne({});
     const commission = settings?.commission || 20;
@@ -1401,6 +1620,6 @@ mongoose.connection.once('open', async () => {
 // ── SERVER START ──────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`Quick10 Backend running on port ${PORT}`);
+  console.log(`Quick10 running on ${PORT}`);
   console.log(`Socket.io ready`);
 });
