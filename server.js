@@ -35,6 +35,9 @@ const SubCategorySchema = new mongoose.Schema({
   parentCategoryId:   String,
   motherCategoryId:   String,
   motherCategoryName: String,
+  parentType:         { type: String, enum: ['mother', 'shop'], default: 'mother' },
+  shopCategoryId:     String,
+  shopCategoryName:   String,
   image:              String,
   imageUrl:           String,
   position:           { type: Number, default: 0 },
@@ -537,7 +540,8 @@ app.get('/api/products', async (req, res) => {
       category, freshCategory, allCategory,
       motherCategory, motherCategoryId,
       subCategory, subCategoryId, section, sectionName,
-      shopCategory, placement, isBanner,
+      shopCategory, shopCategoryId, shopCategoryName,
+      placement, isBanner,
       showInFresh, inFeaturedSection, showOnHome,
       freshCategoryId, freshCategoryName,
       active,
@@ -553,6 +557,8 @@ app.get('/api/products', async (req, res) => {
     if (sectionName)                   filter.sectionName        = sectionName;
     if (placement)                     filter.placement          = placement;
     if (shopCategory)                  filter.shopCategoryId     = shopCategory;
+    if (shopCategoryId)                filter.shopCategoryId     = shopCategoryId;
+    if (shopCategoryName)              filter.shopCategoryName   = shopCategoryName;
     if (freshCategoryId)               filter.freshCategoryId    = freshCategoryId;
     if (freshCategoryName)             filter.freshCategoryName  = freshCategoryName;
 
@@ -704,10 +710,12 @@ app.delete('/api/fresh-categories/:id', async (req, res) => {
 // ── SUB CATEGORIES ────────────────────────────────────────────
 app.get('/api/sub-categories', async (req, res) => {
   try {
-    const { categoryId, motherCategoryId } = req.query;
+    const { categoryId, motherCategoryId, shopCategoryId, parentType } = req.query;
     const filter = { active: true };
     if (categoryId)       filter.categoryId       = categoryId;
     if (motherCategoryId) filter.motherCategoryId = motherCategoryId;
+    if (shopCategoryId)   filter.shopCategoryId   = shopCategoryId;
+    if (parentType)       filter.parentType       = parentType;
     const cats = await SubCategory.find(filter).sort({ position: 1 });
     res.json({ success: true, categories: cats, subCategories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
