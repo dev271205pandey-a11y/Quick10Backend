@@ -1450,7 +1450,7 @@ app.post('/api/upload', async (req, res) => {
 
 // ── RAZORPAY ──────────────────────────────────────────────────
 const Razorpay = require('razorpay');
-const razorpay = new Razorpay({ key_id: 'rzp_test_SmOBM3Muj6dQnF', key_secret: '5M8Z7lP82qM4cNPxaQyrx12k' });
+const razorpay = new Razorpay({ key_id: 'rzp_test_Su4auXVDl2cV9I', key_secret: 'T7KETzJA2yyfkgwONRd4C0sS' });
 app.post('/api/payment/create-order', async (req, res) => {
   try {
     const order = await razorpay.orders.create({ amount: req.body.amount * 100, currency: 'INR', receipt: 'order_' + Date.now() });
@@ -1461,7 +1461,7 @@ app.post('/api/payment/verify', async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
     const crypto = require('crypto');
-    const expected = crypto.createHmac('sha256', '5M8Z7lP82qM4cNPxaQyrx12k').update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
+    const expected = crypto.createHmac('sha256', 'T7KETzJA2yyfkgwONRd4C0sS').update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
     res.json({ success: expected === razorpay_signature, message: expected === razorpay_signature ? 'Payment verified!' : 'Invalid signature' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
