@@ -397,6 +397,12 @@ const PromoSection    = mongoose.model('PromoSection',    PromoSectionSchema);
 const PremiumCategory  = mongoose.model('PremiumCategory',  PremiumCategorySchema);
 const SpecialSection   = mongoose.model('SpecialSection',   SpecialSectionSchema);
 
+const DeliveryTimesSchema = new mongoose.Schema({
+  times:     { type: [String], default: ['20', '25', '30', '22', '28', '35'] },
+  updatedAt: { type: Date, default: Date.now },
+});
+const DeliveryTimes = mongoose.model('DeliveryTimes', DeliveryTimesSchema);
+
 // ── OTP STORE ─────────────────────────────────────────────────
 const otpStore = {};
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -1607,6 +1613,30 @@ app.put('/api/app-settings', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── DELIVERY TIMES ────────────────────────────────────────────
+app.get('/api/delivery-times', async (req, res) => {
+  try {
+    const doc = await DeliveryTimes.findOne().lean();
+    if (!doc) return res.json({ success: true, times: ['20', '25', '30', '22', '28', '35'] });
+    res.json({ success: true, times: doc.times });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/delivery-times', async (req, res) => {
+  try {
+    const { times } = req.body;
+    let doc = await DeliveryTimes.findOne();
+    if (!doc) {
+      doc = new DeliveryTimes({ times });
+    } else {
+      doc.times = times;
+      doc.updatedAt = new Date();
+    }
+    await doc.save();
+    res.json({ success: true, times: doc.times });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── PROMO CODES ───────────────────────────────────────────────
 app.get('/api/promo-codes', async (req, res) => {
   try { const promos = await Promo.find({}).sort({ createdAt: -1 }).lean(); res.json({ success: true, promos }); }
@@ -1833,6 +1863,18 @@ app.get('/api/products/by-subcategory/:subCategoryId', async (req, res) => {
       active: true,
     }).lean();
     res.json({ success: true, products });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── DEBUG ─────────────────────────────────────────────────────
+app.get('/api/debug/products-sample', async (req, res) => {
+  try {
+    const products   = await Product.find({}).limit(5).lean();
+    const categories = await Category.find({}).lean();
+    res.json({
+      products:   products.map(p => ({ name: p.name, category: p.category, shopCategoryId: p.shopCategoryId })),
+      categories: categories.map(c => ({ _id: c._id, name: c.name, categoryId: c.categoryId })),
+    });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
