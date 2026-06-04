@@ -1,9 +1,11 @@
 const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const http = require('http');
 const { Server } = require('socket.io');
 const cloudinary = require('cloudinary').v2;
+const bcrypt = require('bcryptjs');
 
 cloudinary.config({
   cloud_name: 'dw1fwrcz0',
@@ -15,17 +17,18 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
 
+app.use(compression());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use((req, res, next) => {
+  if (req.method === 'GET') res.set('Cache-Control', 'public, max-age=300');
+  next();
+});
 
 const MONGODB_URI = 'mongodb+srv://quickadmin:dev271201deva@cluster0.o9mlhyd.mongodb.net/quick10?retryWrites=true&w=majority';
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('MongoDB Connected!'))
   .catch(err => console.log('MongoDB Error:', err));
-
-setInterval(() => {
-  fetch('https://quick10backend.onrender.com/health').catch(() => {});
-}, 14 * 60 * 1000);
 
 // ── SCHEMAS ──────────────────────────────────────────────────
 
@@ -127,6 +130,9 @@ const OrderSchema = new mongoose.Schema({
   address:             Object,
   status:              { type: String, default: 'pending', enum: ['pending', 'packing', 'ready_pickup', 'dispatched', 'delivered', 'cancelled'] },
   paymentMethod:       String,
+  paymentStatus:       { type: String, default: 'pending', enum: ['pending', 'paid', 'failed'] },
+  paymentId:           String,
+  paymentOrderId:      String,
   deliveryPartner:     Object,
   assignedTo:          { type: String, default: null },
   assignedName:        String,
@@ -152,9 +158,10 @@ const OrderSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const UserSchema = new mongoose.Schema({
-  phone:     { type: String, unique: true },
+  phone:     { type: String, unique: true, sparse: true },
   name:      String,
-  email:     String,
+  email:     { type: String, unique: true, sparse: true },
+  password:  String,
   addresses: Array,
 }, { timestamps: true });
 
@@ -260,6 +267,7 @@ const AppSettingsSchema = new mongoose.Schema({
   maintenanceMode:   { type: Boolean, default: false },
   appVersion:        { type: String,  default: '1.0.0' },
   freshBannerUrl:    { type: String,  default: '' },
+  footerText:        { type: String,  default: 'Thank you for choosing Quick10! Fresh groceries delivered in 10 mins, with love.' },
   pageThemes:        {
     type: Object,
     default: {
@@ -356,6 +364,16 @@ const PremiumCategorySchema = new mongoose.Schema({
   active:   { type: Boolean, default: true },
 }, { timestamps: true });
 
+const SpecialSectionSchema = new mongoose.Schema({
+  titleLine1: { type: String, default: 'Special' },
+  titleLine2: { type: String, default: 'For You' },
+  subtitle:   { type: String, default: 'Fresh, Fixed — Delivered in 10 mins' },
+  smallText:  { type: String, default: '✦ curated for you ✦' },
+  imageUrl:   { type: String, default: '' },
+  showImage:  { type: Boolean, default: false },
+  active:     { type: Boolean, default: true },
+}, { timestamps: true });
+
 // ── MODELS ───────────────────────────────────────────────────
 const SubCategory     = mongoose.model('SubCategory',     SubCategorySchema);
 const Product         = mongoose.model('Product',         ProductSchema);
@@ -376,7 +394,8 @@ const AppControl      = mongoose.model('AppControl',      AppControlSchema);
 const Promo           = mongoose.model('Promo',           PromoSchema);
 const Attendance      = mongoose.model('Attendance',      AttendanceSchema);
 const PromoSection    = mongoose.model('PromoSection',    PromoSectionSchema);
-const PremiumCategory = mongoose.model('PremiumCategory', PremiumCategorySchema);
+const PremiumCategory  = mongoose.model('PremiumCategory',  PremiumCategorySchema);
+const SpecialSection   = mongoose.model('SpecialSection',   SpecialSectionSchema);
 
 // ── OTP STORE ─────────────────────────────────────────────────
 const otpStore = {};
@@ -548,6 +567,41 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+    if (!email || !password) return res.json({ success: false, message: 'Email and password required' });
+
+    const existing = await User.findOne({ email });
+    if (existing) return res.json({ success: false, message: 'Email already registered' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({
+      email,
+      password: hashedPassword,
+      name: name || 'Quick10 User',
+      phone: email,
+    });
+    await user.save();
+
+    res.json({ success: true, user: { _id: user._id, email: user.email, name: user.name } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) return res.json({ success: false, message: 'Email not registered' });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.json({ success: false, message: 'Wrong password' });
+
+    res.json({ success: true, user: { _id: user._id, email: user.email, name: user.name, addresses: user.addresses } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── PRODUCTS ──────────────────────────────────────────────────
 app.get('/api/products', async (req, res) => {
   try {
@@ -562,8 +616,17 @@ app.get('/api/products', async (req, res) => {
       active,
     } = req.query;
 
+    const page  = parseInt(req.query.page)  || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip  = (page - 1) * limit;
+
     let filter = { active: true };
     if (active === 'all') delete filter.active;
+
+    if (req.query.ids) {
+      const idArray = req.query.ids.split(',');
+      filter._id = { $in: idArray };
+    }
 
     if (isBanner === 'true')           filter.isBanner          = true;
     if (showInFresh === 'true')        filter.showInFresh        = true;
@@ -618,14 +681,18 @@ app.get('/api/products', async (req, res) => {
       filter.$or = [{ category }, { motherCategory: category }, { allCategory: category }, { freshCategory: category }];
     }
 
-    const products = await Product.find(filter).sort({ position: 1, createdAt: -1 });
-    res.json({ success: true, products });
+    const products = await Product.find(filter)
+      .sort({ position: 1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    res.json({ success: true, products, page, limit });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.get('/api/products/all', async (req, res) => {
   try {
-    const products = await Product.find({}).sort({ position: 1 });
+    const products = await Product.find({}).sort({ position: 1 }).lean();
     res.json({ success: true, products });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -669,8 +736,7 @@ app.put('/api/products/:id/featured-toggle', async (req, res) => {
 // ── CATEGORIES ────────────────────────────────────────────────
 app.get('/api/categories', async (req, res) => {
   try {
-    res.set('Cache-Control', 'no-store');
-    const categories = await Category.find({ active: true });
+    const categories = await Category.find({ active: true }).lean();
     res.json({ success: true, categories });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -695,8 +761,7 @@ app.delete('/api/categories/:id', async (req, res) => {
 // ── MOTHER CATEGORIES ─────────────────────────────────────────
 app.get('/api/mother-categories', async (req, res) => {
   try {
-    res.set('Cache-Control', 'no-store');
-    const cats = await MotherCategory.find({ active: true }).sort({ order: 1, position: 1 });
+    const cats = await MotherCategory.find({ active: true }).sort({ order: 1, position: 1 }).lean();
     res.json({ success: true, categories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -722,8 +787,7 @@ app.delete('/api/mother-categories/:id', async (req, res) => {
 // ── FRESH CATEGORIES ──────────────────────────────────────────
 app.get('/api/fresh-categories', async (req, res) => {
   try {
-    res.set('Cache-Control', 'no-store');
-    const cats = await FreshCategory.find({ active: true }).sort({ order: 1 });
+    const cats = await FreshCategory.find({ active: true }).sort({ order: 1 }).lean();
     res.json({ success: true, categories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -755,7 +819,7 @@ app.get('/api/sub-categories', async (req, res) => {
     if (motherCategoryId) filter.motherCategoryId = motherCategoryId;
     if (shopCategoryId)   filter.shopCategoryId   = shopCategoryId;
     if (parentType)       filter.parentType       = parentType;
-    const cats = await SubCategory.find(filter).sort({ position: 1 });
+    const cats = await SubCategory.find(filter).sort({ position: 1 }).lean();
     res.json({ success: true, categories: cats, subCategories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -778,7 +842,7 @@ app.delete('/api/sub-categories/:id', async (req, res) => {
 app.get('/api/sections', async (req, res) => {
   try {
     const filter = req.query.all === 'true' ? {} : { active: true };
-    const sections = await Section.find(filter).sort({ position: 1, createdAt: -1 });
+    const sections = await Section.find(filter).sort({ position: 1, createdAt: -1 }).lean();
     res.json({ success: true, sections });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -805,7 +869,7 @@ app.delete('/api/sections/:id', async (req, res) => {
 
 app.get('/api/home-sections-by-title', async (req, res) => {
   try {
-    const sections = await Section.find({ active: true });
+    const sections = await Section.find({ active: true }).lean();
     const result = [];
     for (const sec of sections) {
       const products = await Product.find({ homeSectionTitle: sec.name, active: true }).lean();
@@ -843,13 +907,13 @@ app.get('/api/shop-categories', async (req, res) => {
   try {
     const filter = { active: true };
     if (req.query.motherCategoryId) filter.motherCategoryId = req.query.motherCategoryId;
-    const cats = await ShopCategory.find(filter).sort({ position: 1 });
+    const cats = await ShopCategory.find(filter).sort({ position: 1 }).lean();
     res.json({ success: true, categories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.get('/api/shop-categories/by-mother/:motherCategoryId', async (req, res) => {
   try {
-    const cats = await ShopCategory.find({ motherCategoryId: req.params.motherCategoryId, active: true }).sort({ position: 1 });
+    const cats = await ShopCategory.find({ motherCategoryId: req.params.motherCategoryId, active: true }).sort({ position: 1 }).lean();
     res.json({ success: true, categories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -894,7 +958,7 @@ app.get('/api/fresh-section', async (req, res) => {
 // ── ORDERS ────────────────────────────────────────────────────
 app.get('/api/orders', async (req, res) => {
   try {
-    const orders = await Order.find({}).sort({ createdAt: -1 });
+    const orders = await Order.find({}).sort({ createdAt: -1 }).lean();
     res.json({ success: true, orders });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -908,12 +972,12 @@ app.post('/api/orders', async (req, res) => {
 });
 app.get('/api/orders/user/:phone', async (req, res) => {
   try {
-    const orders = await Order.find({ userPhone: req.params.phone }).sort({ createdAt: -1 });
+    const orders = await Order.find({ userPhone: req.params.phone }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, orders });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.get('/api/orders/:id', async (req, res) => {
-  try { const order = await Order.findById(req.params.id); res.json({ success: true, order }); }
+  try { const order = await Order.findById(req.params.id).lean(); res.json({ success: true, order }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1214,7 +1278,7 @@ app.put('/api/orders/:id/status', async (req, res) => {
 // ── DELIVERY ──────────────────────────────────────────────────
 app.get('/api/delivery/available-orders', async (req, res) => {
   try {
-    const orders = await Order.find({ status: 'packed', assignedTo: null });
+    const orders = await Order.find({ status: 'packed', assignedTo: null }).lean();
     res.json({ success: true, orders });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1250,7 +1314,7 @@ app.put('/api/delivery/deliver-order', async (req, res) => {
 });
 app.get('/api/delivery/my-order/:phone', async (req, res) => {
   try {
-    const order = await Order.findOne({ assignedTo: req.params.phone, status: 'out_for_delivery' });
+    const order = await Order.findOne({ assignedTo: req.params.phone, status: 'out_for_delivery' }).lean();
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1266,7 +1330,7 @@ app.put('/api/delivery/update-location', async (req, res) => {
 // ── USERS ─────────────────────────────────────────────────────
 app.get('/api/users/:phone', async (req, res) => {
   try {
-    const user = await User.findOne({ phone: req.params.phone });
+    const user = await User.findOne({ phone: req.params.phone }).lean();
     if (!user) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true, user });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -1306,12 +1370,12 @@ const generateStaffId = async (role) => {
 };
 
 app.get('/api/staff', async (req, res) => {
-  try { const staff = await Staff.find({}).sort({ createdAt: -1 }); res.json({ success: true, staff }); }
+  try { const staff = await Staff.find({}).sort({ createdAt: -1 }).lean(); res.json({ success: true, staff }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.get('/api/staff/:id', async (req, res) => {
   try {
-    const staff = await Staff.findById(req.params.id);
+    const staff = await Staff.findById(req.params.id).lean();
     if (!staff) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true, staff });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -1361,7 +1425,7 @@ app.put('/api/staff/:id/toggle-status', async (req, res) => {
 app.post('/api/staff/login', async (req, res) => {
   try {
     const { phone, password } = req.body;
-    const staff = await Staff.findOne({ $or: [{ phone }, { mobile: phone }], password, active: true });
+    const staff = await Staff.findOne({ $or: [{ phone }, { mobile: phone }], password, active: true }).lean();
     if (!staff) return res.json({ success: false, message: 'Phone ya password galat hai' });
     res.json({ success: true, staff });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -1370,7 +1434,7 @@ app.get('/api/staff/:id/earnings', async (req, res) => {
   try {
     const staff = await Staff.findById(req.params.id);
     if (!staff) return res.status(404).json({ success: false, message: 'Not found' });
-    const orders = await Order.find({ deliveryPartnerId: req.params.id, status: 'delivered' }).sort({ createdAt: -1 });
+    const orders = await Order.find({ deliveryPartnerId: req.params.id, status: 'delivered' }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, totalEarnings: staff.totalEarnings, totalOrdersHandled: staff.totalOrdersHandled, orders });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1393,13 +1457,13 @@ app.get('/api/finance/payouts', async (req, res) => {
     const filter = {};
     if (req.query.date)    filter.date    = req.query.date;
     if (req.query.staffId) filter.staffId = req.query.staffId;
-    const payouts = await Payout.find(filter).sort({ createdAt: -1 });
+    const payouts = await Payout.find(filter).sort({ createdAt: -1 }).lean();
     res.json({ success: true, payouts });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.get('/api/finance/payouts/:staffId', async (req, res) => {
   try {
-    const payouts = await Payout.find({ staffId: req.params.staffId }).sort({ createdAt: -1 });
+    const payouts = await Payout.find({ staffId: req.params.staffId }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, payouts });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1419,14 +1483,14 @@ app.put('/api/finance/payout/:id', async (req, res) => {
 app.get('/api/finance/summary', async (req, res) => {
   try {
     const today  = new Date().toLocaleDateString('en-CA');
-    const riders = await Staff.find({ role: { $in: ['Rider', 'rider', 'delivery_partner'] } });
-    const todayPayouts = await Payout.find({ date: today });
-    const settings = await AppSettings.findOne({});
+    const riders = await Staff.find({ role: { $in: ['Rider', 'rider', 'delivery_partner'] } }).lean();
+    const todayPayouts = await Payout.find({ date: today }).lean();
+    const settings = await AppSettings.findOne({}).lean();
     const commission = settings?.commission || 20;
     const basePay    = settings?.basePay    || 200;
     const start = new Date(); start.setHours(0,0,0,0);
     const end   = new Date(); end.setHours(23,59,59,999);
-    const orders = await Order.find({ status: 'delivered', createdAt: { $gte: start, $lte: end } });
+    const orders = await Order.find({ status: 'delivered', createdAt: { $gte: start, $lte: end } }).lean();
     const riderStats = riders.map(r => {
       const rOrders       = orders.filter(o => o.assignedTo === r.phone || o.assignedTo === r.mobile);
       const deliveryCount = rOrders.length;
@@ -1441,11 +1505,28 @@ app.get('/api/finance/summary', async (req, res) => {
 // ── UPLOAD ────────────────────────────────────────────────────
 app.post('/api/upload', async (req, res) => {
   try {
-    const { image } = req.body;
-    if (!image) return res.status(400).json({ success: false, message: 'image required' });
-    const result = await cloudinary.uploader.upload(image, { folder: 'quick10', resource_type: 'auto' });
-    res.json({ success: true, url: result.secure_url });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    const { image, type = 'general' } = req.body
+    if (!image) return res.status(400).json({ success: false, message: 'image required' })
+
+    const uploadOptions = { folder: 'quick10', fetch_format: 'auto', crop: 'limit' }
+
+    if (type === 'thumbnail') {
+      uploadOptions.width = 400
+      uploadOptions.quality = 'auto:eco'
+    } else if (type === 'icon') {
+      uploadOptions.width = 200
+      uploadOptions.quality = 'auto:eco'
+    } else {
+      uploadOptions.width = 800
+      uploadOptions.quality = 'auto:good'
+    }
+
+    const result = await cloudinary.uploader.upload(image, uploadOptions)
+    const imageUrl = result.secure_url.replace('/upload/', '/upload/w_400,q_70,f_auto/')
+    res.json({ success: true, url: imageUrl })
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message })
+  }
 });
 
 // ── RAZORPAY ──────────────────────────────────────────────────
@@ -1528,7 +1609,7 @@ app.put('/api/app-settings', async (req, res) => {
 
 // ── PROMO CODES ───────────────────────────────────────────────
 app.get('/api/promo-codes', async (req, res) => {
-  try { const promos = await Promo.find({}).sort({ createdAt: -1 }); res.json({ success: true, promos }); }
+  try { const promos = await Promo.find({}).sort({ createdAt: -1 }).lean(); res.json({ success: true, promos }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.post('/api/promo-codes', async (req, res) => {
@@ -1538,7 +1619,7 @@ app.post('/api/promo-codes', async (req, res) => {
 app.post('/api/promo-codes/validate', async (req, res) => {
   try {
     const { code, orderAmount } = req.body;
-    const promo = await Promo.findOne({ code: code.toUpperCase(), active: true });
+    const promo = await Promo.findOne({ code: code.toUpperCase(), active: true }).lean();
     if (!promo) return res.json({ success: false, message: 'Invalid coupon code' });
     if (promo.expiryDate && new Date() > promo.expiryDate) return res.json({ success: false, message: 'Coupon expired' });
     if (promo.usedCount >= promo.maxUses) return res.json({ success: false, message: 'Coupon limit full' });
@@ -1560,7 +1641,7 @@ app.delete('/api/promo-codes/:id', async (req, res) => {
 app.get('/api/attendance', async (req, res) => {
   try {
     const filter = req.query.date ? { date: req.query.date } : {};
-    const records = await Attendance.find(filter).sort({ createdAt: -1 });
+    const records = await Attendance.find(filter).sort({ createdAt: -1 }).lean();
     res.json({ success: true, records });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1622,7 +1703,7 @@ app.delete('/api/featured-section/:id', async (req, res) => {
 // ── BANNERS ───────────────────────────────────────────────────
 app.get('/api/banners', async (req, res) => {
   try {
-    const banners = await Banner.find({}).sort({ orderNum: 1, order: 1, createdAt: -1 });
+    const banners = await Banner.find({}).sort({ orderNum: 1, order: 1, createdAt: -1 }).lean();
     res.json({ success: true, banners });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1664,7 +1745,7 @@ app.put('/api/promo-section/:id', async (req, res) => {
 // ── PREMIUM CATEGORIES ────────────────────────────────────────
 app.get('/api/premium-categories', async (req, res) => {
   try {
-    const cats = await PremiumCategory.find({}).sort({ createdAt: -1 });
+    const cats = await PremiumCategory.find({}).sort({ createdAt: -1 }).lean();
     res.json({ success: true, premiumCategories: cats, categories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1684,6 +1765,43 @@ app.delete('/api/premium-categories/:id', async (req, res) => {
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── SPECIAL SECTION ───────────────────────────────────────────
+const specialSectionDefaults = {
+  titleLine1: 'Special',
+  titleLine2: 'For You',
+  subtitle:   'Fresh, Fixed — Delivered in 10 mins',
+  smallText:  '✦ curated for you ✦',
+  imageUrl:   '',
+  showImage:  false,
+  active:     true,
+};
+
+app.get('/api/special-section', async (req, res) => {
+  try {
+    const section = await SpecialSection.findOne({});
+    res.json({ success: true, section: section || specialSectionDefaults });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.put('/api/special-section', async (req, res) => {
+  try {
+    const { titleLine1, titleLine2, subtitle, smallText, imageUrl, showImage } = req.body;
+    const update = {};
+    if (titleLine1 !== undefined) update.titleLine1 = titleLine1;
+    if (titleLine2 !== undefined) update.titleLine2 = titleLine2;
+    if (subtitle   !== undefined) update.subtitle   = subtitle;
+    if (smallText  !== undefined) update.smallText  = smallText;
+    if (imageUrl   !== undefined) update.imageUrl   = imageUrl;
+    if (showImage  !== undefined) update.showImage  = showImage;
+    const section = await SpecialSection.findOneAndUpdate(
+      {},
+      { $set: update },
+      { new: true, upsert: true }
+    );
+    res.json({ success: true, section });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── MOTHER CATEGORY FULL ──────────────────────────────────────
 app.get('/api/mother-categories/:id/full', async (req, res) => {
   try {
@@ -1695,9 +1813,11 @@ app.get('/api/mother-categories/:id/full', async (req, res) => {
     const [subCategories, products] = await Promise.all([
       SubCategory.find({ $or: [{ motherCategoryId: id }, { motherCategoryId: catId }], active: true })
         .select('_id name image imageUrl categoryId position active')
-        .sort({ position: 1 }),
+        .sort({ position: 1 })
+        .lean(),
       Product.find({ $or: [{ motherCategoryId: id }, { motherCategoryId: catId }, { motherCategory: catId }], active: true })
-        .select('_id name price mrp weight imageUrl stock active subCategoryId subCategoryName discount rating'),
+        .select('_id name price mrp weight imageUrl stock active subCategoryId subCategoryName discount rating')
+        .lean(),
     ]);
 
     res.json({ success: true, category, subCategories, products });
@@ -1711,7 +1831,7 @@ app.get('/api/products/by-subcategory/:subCategoryId', async (req, res) => {
     const products = await Product.find({
       $or: [{ subCategoryId }, { subCategory: subCategoryId }],
       active: true,
-    });
+    }).lean();
     res.json({ success: true, products });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1744,9 +1864,12 @@ mongoose.connection.once('open', async () => {
   try {
     await Product.collection.createIndex({ category: 1 });
     await Product.collection.createIndex({ active: 1 });
+    await Product.collection.createIndex({ active: 1, category: 1 });
+    await Product.collection.createIndex({ shopCategoryId: 1 });
     await Product.collection.createIndex({ sectionId: 1 });
     await Product.collection.createIndex({ subCategoryId: 1 });
     await Product.collection.createIndex({ motherCategoryId: 1 });
+    await Category.collection.createIndex({ active: 1 });
     await Order.collection.createIndex({ userPhone: 1 });
     await Order.collection.createIndex({ status: 1 });
     await Order.collection.createIndex({ assignedTo: 1 });
