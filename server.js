@@ -1974,6 +1974,48 @@ mongoose.connection.once('open', async () => {
   } catch (err) { console.log('Setup error:', err.message); }
 });
 
+app.get('/api/auth/create-test-user', async (req, res) => {
+  try {
+    const bcrypt = require('bcryptjs')
+    const existing = await User.findOne({
+      email: 'google-reviewer@quick10.com'
+    })
+    if (existing) {
+      return res.json({
+        success: true,
+        message: 'Test user already exists'
+      })
+    }
+    const hashed = await bcrypt.hash('Reviewer@Secure2026', 10)
+    const user = new User({
+      email: 'google-reviewer@quick10.com',
+      password: hashed,
+      name: 'Google Reviewer',
+      phone: '9999999999',
+      addresses: [{
+        id: 'test-addr-1',
+        type: 'HOME',
+        name: 'Google Reviewer',
+        mobile: '9999999999',
+        houseNo: '123',
+        building: 'Test Building',
+        area: 'Balrampur',
+        city: 'Balrampur',
+        state: 'Uttar Pradesh',
+        pincode: '271201',
+        isDefault: true
+      }]
+    })
+    await user.save()
+    res.json({ success: true, message: 'Test user created!' })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    })
+  }
+})
+
 // ── SERVER START ──────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
