@@ -1,3 +1,4 @@
+require('dotenv').config()
 const express = require('express');
 const compression = require('compression');
 const cors = require('cors');
@@ -8,9 +9,9 @@ const cloudinary = require('cloudinary').v2;
 const bcrypt = require('bcryptjs');
 
 cloudinary.config({
-  cloud_name: 'dw1fwrcz0',
-  api_key: '935717982737519',
-  api_secret: 'bwpi2vW6bGxiCbfSoe3N0ShP6Ko',
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 const app = express();
@@ -25,8 +26,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const MONGODB_URI = 'mongodb+srv://quickadmin:dev271201deva@cluster0.o9mlhyd.mongodb.net/quick10?retryWrites=true&w=majority';
-mongoose.connect(MONGODB_URI)
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('MongoDB Connected!'))
   .catch(err => console.log('MongoDB Error:', err));
 
@@ -599,7 +599,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (email === 'google-reviewer@quick10.com') {
+    if (email === process.env.TEST_USER_EMAIL) {
       const user = await User.findOne({ email });
       if (!user) return res.json({ success: false, message: 'Test account not found' });
       const valid = await bcrypt.compare(password, user.password);
@@ -1978,7 +1978,7 @@ app.get('/api/auth/create-test-user', async (req, res) => {
   try {
     const bcrypt = require('bcryptjs')
     const existing = await User.findOne({
-      email: 'google-reviewer@quick10.com'
+      email: process.env.TEST_USER_EMAIL
     })
     if (existing) {
       return res.json({
@@ -1986,9 +1986,9 @@ app.get('/api/auth/create-test-user', async (req, res) => {
         message: 'Test user already exists'
       })
     }
-    const hashed = await bcrypt.hash('Reviewer@Secure2026', 10)
+    const hashed = await bcrypt.hash(process.env.TEST_USER_PASSWORD, 10)
     const user = new User({
-      email: 'google-reviewer@quick10.com',
+      email: process.env.TEST_USER_EMAIL,
       password: hashed,
       name: 'Google Reviewer',
       phone: '9999999999',
