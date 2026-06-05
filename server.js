@@ -88,6 +88,7 @@ const ProductSchema = new mongoose.Schema({
   showInFresh:        { type: Boolean, default: false },
   homeSectionTitle:   String,
   discount:           Number,
+  keywords:           { type: [String], default: [] },
 }, { timestamps: true, strict: false });
 
 const CategorySchema = new mongoose.Schema({
@@ -625,6 +626,25 @@ app.get('/api/products', async (req, res) => {
     const page  = parseInt(req.query.page)  || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip  = (page - 1) * limit;
+
+    // ── Search shortcut ───────────────────────────────────────────
+    if (req.query.search) {
+      const searchTerm = req.query.search.toLowerCase();
+      const filter = {
+        active: true,
+        $or: [
+          { name:        { $regex: searchTerm, $options: 'i' } },
+          { keywords:    { $elemMatch: { $regex: searchTerm, $options: 'i' } } },
+          { description: { $regex: searchTerm, $options: 'i' } },
+        ],
+      };
+      const products = await Product.find(filter)
+        .sort({ position: 1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+      return res.json({ success: true, products, page, limit });
+    }
 
     let filter = { active: true };
     if (active === 'all') delete filter.active;
