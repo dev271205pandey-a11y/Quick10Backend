@@ -599,6 +599,25 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    if (email === 'google-reviewer@quick10.com') {
+      const user = await User.findOne({ email });
+      if (!user) return res.json({ success: false, message: 'Test account not found' });
+      const valid = await bcrypt.compare(password, user.password);
+      if (!valid) return res.json({ success: false, message: 'Invalid password' });
+      return res.json({
+        success: true,
+        user: {
+          _id: user._id,
+          email: user.email,
+          name: user.name,
+          phone: user.phone,
+          addresses: user.addresses,
+          isTestAccount: true
+        },
+        message: 'Test account login successful'
+      });
+    }
+
     const user = await User.findOne({ email });
     if (!user) return res.json({ success: false, message: 'Email not registered' });
 
