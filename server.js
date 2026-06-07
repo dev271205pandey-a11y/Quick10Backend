@@ -147,6 +147,7 @@ const OrderSchema = new mongoose.Schema({
   deliveryPartnerName:  String,
   deliveryPartnerPhone: String,
   rejectedBy:          { type: [String], default: [] },
+  currentlyNotifying:  String,
   pickerAcceptedAt:    Date,
   dispatchedAt:        Date,
   deliveredAt:         Date,
@@ -1070,7 +1071,7 @@ app.put('/api/orders/:id/accept-packing', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Picker done packing → status: ready_pickup, notify assigned delivery partner
+// Picker done packing → status: ready_pickup, find & notify available delivery partners
 app.put('/api/orders/:id/ready-pickup', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(
@@ -1079,10 +1080,29 @@ app.put('/api/orders/:id/ready-pickup', async (req, res) => {
       { new: true }
     );
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
-    emitOrderUpdate(order);
-    if (order.deliveryPartnerId) {
-      io.to('delivery_' + order.deliveryPartnerId.toString()).emit('order_ready_pickup', { orderId: order._id });
+
+    const availablePartners = await Staff.find({
+      role: 'delivery_partner',
+      isActive: true,
+      isAvailable: true,
+      currentOrderId: null,
+    });
+
+    if (availablePartners.length === 0) {
+      io.to('warehouse_admin').emit('no_partners_available', {
+        orderId: order._id,
+        message: 'Koi delivery partner available nahi hai!',
+      });
+    } else {
+      const firstPartner = availablePartners[0];
+      io.to('delivery_' + firstPartner._id).emit('new_order_available', { order, earning: 30 });
+      await Order.findByIdAndUpdate(order._id, {
+        currentlyNotifying: firstPartner._id.toString(),
+        rejectedBy: [],
+      });
     }
+
+    io.to('warehouse_admin').emit('order_update', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1161,95 +1181,87 @@ app.put('/api/orders/:id/accept-delivery', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Delivery partner rejects delivery → clear assignment, find next available partner
+// Delivery partner rejects delivery → notify next available partner
 app.put('/api/orders/:id/reject-delivery', async (req, res) => {
   try {
-    const { partnerId, deliveryPartnerId } = req.body;
-    const pid = partnerId || deliveryPartnerId;
+    const { partnerId, partnerName } = req.body;
 
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      {
-        $addToSet: { rejectedBy: pid },
-        deliveryPartnerId: null, deliveryPartnerName: null, deliveryPartnerPhone: null,
-      },
-      { new: true }
-    );
+    const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, order });
 
-    setTimeout(async () => {
-      const fresh = await Order.findById(order._id);
-      if (!fresh) return;
+    const rejectedBy = [...(order.rejectedBy || []), partnerId];
 
-      const rejectedIds = (fresh.rejectedBy || [])
-        .filter(id => mongoose.Types.ObjectId.isValid(id))
-        .map(id => new mongoose.Types.ObjectId(id));
+    const rejectedIds = rejectedBy
+      .filter(id => mongoose.Types.ObjectId.isValid(id))
+      .map(id => new mongoose.Types.ObjectId(id));
 
-      const nextPartner = await Staff.findOne({
-        role: { $in: ['Rider', 'rider', 'delivery_partner', 'delivery'] },
-        isAvailable: true, currentOrderId: null, active: true,
-        _id: { $nin: rejectedIds },
+    const nextPartner = await Staff.findOne({
+      role: 'delivery_partner',
+      isActive: true,
+      isAvailable: true,
+      currentOrderId: null,
+      _id: { $nin: rejectedIds },
+    });
+
+    io.to('warehouse_admin').emit('partner_rejected', {
+      orderId: order._id,
+      partnerName,
+      message: partnerName + ' ne order reject kar diya!',
+    });
+
+    if (!nextPartner) {
+      await Order.findByIdAndUpdate(req.params.id, {
+        status: 'unassigned',
+        rejectedBy,
+        currentlyNotifying: null,
       });
+      io.to('warehouse_admin').emit('manual_assign_needed', {
+        orderId: order._id,
+        message: 'Sabhi partners ne reject kiya! Manual assign karo!',
+      });
+      return res.json({ success: true, message: 'No partners available' });
+    }
 
-      const payload = {
-        orderId:         fresh._id,
-        orderDisplayId:  fresh.orderId,
-        customerName:    fresh.address?.name,
-        customerPhone:   fresh.address?.mobile,
-        customerAddress: fresh.address,
-        items:           fresh.items,
-        total:           fresh.total,
-        paymentMethod:   fresh.paymentMethod,
-        earningAmount:   fresh.earningAmount || 30,
-      };
+    setTimeout(() => {
+      io.to('delivery_' + nextPartner._id).emit('new_order_available', { order, earning: 30 });
+    }, 1000);
 
-      if (nextPartner) {
-        await Order.findByIdAndUpdate(fresh._id, {
-          deliveryPartnerId:    nextPartner._id.toString(),
-          deliveryPartnerName:  nextPartner.name,
-          deliveryPartnerPhone: nextPartner.phone || nextPartner.mobile,
-        });
-        io.to('delivery_' + nextPartner._id.toString()).emit('new_order_available', payload);
-      } else {
-        const fallback = Object.values(onlineDeliveryPartners).find(
-          p => !p.busy && !(fresh.rejectedBy || []).includes(p.phone)
-        );
-        if (fallback) {
-          io.to('delivery_' + (fallback._id || fallback.phone)).emit('new_order_available', payload);
-        } else {
-          io.to('warehouse_admin').emit('all_partners_rejected', {
-            order: fresh, message: 'Sabne reject kar diya — manually assign karo',
-          });
-        }
-      }
-    }, 2000);
+    await Order.findByIdAndUpdate(req.params.id, {
+      rejectedBy,
+      currentlyNotifying: nextPartner._id.toString(),
+    });
+
+    res.json({ success: true, nextPartner: nextPartner.name });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // Admin manually assigns delivery partner → emit new_order_available directly to that partner
 app.put('/api/orders/:id/assign-partner', async (req, res) => {
   try {
-    const { partnerId, deliveryPartnerId, partnerName } = req.body;
-    const pid = partnerId || deliveryPartnerId;
+    const { partnerId } = req.body;
+
+    const partner = await Staff.findById(partnerId);
+    if (!partner) return res.status(404).json({ success: false, message: 'Partner not found' });
+
     const order = await Order.findByIdAndUpdate(
       req.params.id,
-      { deliveryPartnerId: pid, deliveryPartnerName: partnerName, assignedTo: pid, assignedName: partnerName },
+      {
+        deliveryPartnerId:    partnerId,
+        deliveryPartnerName:  partner.name,
+        deliveryPartnerPhone: partner.phone,
+        currentlyNotifying:   partnerId,
+      },
       { new: true }
     );
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
-    io.to('delivery_' + pid).emit('new_order_available', {
-      orderId:         order._id,
-      orderDisplayId:  order.orderId,
-      customerName:    order.address?.name,
-      customerPhone:   order.address?.mobile,
-      customerAddress: order.address,
-      items:           order.items,
-      total:           order.total,
-      paymentMethod:   order.paymentMethod,
-      earningAmount:   order.earningAmount || 30,
+
+    io.to('delivery_' + partnerId).emit('new_order_available', {
+      order,
+      earning: 30,
+      isManualAssign: true,
     });
-    emitOrderUpdate(order);
+
+    io.to('warehouse_admin').emit('order_update', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
