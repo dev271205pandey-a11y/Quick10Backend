@@ -405,6 +405,15 @@ const DeliveryTimesSchema = new mongoose.Schema({
 });
 const DeliveryTimes = mongoose.model('DeliveryTimes', DeliveryTimesSchema);
 
+const BroadcastSchema = new mongoose.Schema({
+  message:   { type: String, required: true },
+  imageUrl:  { type: String, default: '' },
+  sentBy:    { type: String, default: 'admin' },
+  readBy:    { type: [String], default: [] },
+  createdAt: { type: Date, default: Date.now },
+});
+const Broadcast = mongoose.model('Broadcast', BroadcastSchema);
+
 // ── OTP STORE ─────────────────────────────────────────────────
 const otpStore = {};
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -2027,6 +2036,52 @@ app.get('/api/auth/create-test-user', async (req, res) => {
     })
   }
 })
+
+// ── BROADCAST ROUTES ─────────────────────────────────────────
+app.get('/api/broadcasts', async (req, res) => {
+  try {
+    const messages = await Broadcast.find({}).sort({ createdAt: -1 }).lean();
+    res.json({ success: true, messages });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/broadcasts', async (req, res) => {
+  try {
+    const { message, imageUrl } = req.body;
+    const broadcast = new Broadcast({ message, imageUrl: imageUrl || '' });
+    await broadcast.save();
+    io.emit('new_broadcast', {
+      _id:       broadcast._id,
+      message:   broadcast.message,
+      imageUrl:  broadcast.imageUrl,
+      createdAt: broadcast.createdAt,
+    });
+    res.json({ success: true, broadcast });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/broadcasts/:id/read', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    await Broadcast.findByIdAndUpdate(req.params.id, { $addToSet: { readBy: userPhone } });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/broadcasts/:id', async (req, res) => {
+  try {
+    await Broadcast.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // ── SERVER START ──────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
