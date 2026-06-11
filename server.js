@@ -539,6 +539,22 @@ io.on('connection', (socket) => {
   });
 });
 
+// ── DEBUG ─────────────────────────────────────────────────────
+app.get('/api/debug', async (req, res) => {
+  try {
+    const count = await Product.countDocuments({});
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    const dbName = mongoose.connection.db.databaseName;
+    res.json({
+      productCount: count,
+      database: dbName,
+      collections: collections.map(c => c.name)
+    });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 // ── HEALTH ────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'OK', message: 'Backend is running!' }));
 
