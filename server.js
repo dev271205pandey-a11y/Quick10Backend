@@ -9,9 +9,9 @@ const cloudinary = require('cloudinary').v2;
 const bcrypt = require('bcryptjs');
 
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dw1fwrcz0',
+  api_key:    process.env.CLOUDINARY_API_KEY    || '935717982737519',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'bwpi2vW6bGxiCbfSoe3N0ShP6Ko',
 });
 
 const app = express();
@@ -26,7 +26,8 @@ app.use((req, res, next) => {
   next();
 });
 
-mongoose.connect(process.env.MONGODB_URI)
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGODB_URL || 'mongodb+srv://quickadmin:dev271201deva@cluster0.o9mlhyd.mongodb.net/quick10';
+mongoose.connect(MONGODB_URI)
   .then(() => console.log('MongoDB Connected!'))
   .catch(err => console.log('MongoDB Error:', err));
 
