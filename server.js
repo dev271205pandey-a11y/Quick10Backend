@@ -26,7 +26,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGODB_URL || 'mongodb+srv://quickadmin:dev271201deva@cluster0.o9mlhyd.mongodb.net/quick10';
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGODB_URL || 'mongodb+srv://quickadmin:dev271201deva@cluster0.o9mlhyd.mongodb.net/quick10?retryWrites=true&w=majority';
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('MongoDB Connected!'))
   .catch(err => console.log('MongoDB Error:', err));
