@@ -674,7 +674,7 @@ app.get('/api/products', async (req, res) => {
       return res.json({ success: true, products, page, limit });
     }
 
-    let filter = { active: true };
+    let filter = {};
     if (active === 'all') delete filter.active;
 
     if (req.query.ids) {
@@ -790,7 +790,7 @@ app.put('/api/products/:id/featured-toggle', async (req, res) => {
 // ── CATEGORIES ────────────────────────────────────────────────
 app.get('/api/categories', async (req, res) => {
   try {
-    const categories = await Category.find({ active: true }).lean();
+    const categories = await Category.find({}).lean();
     res.json({ success: true, categories });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -815,7 +815,7 @@ app.delete('/api/categories/:id', async (req, res) => {
 // ── MOTHER CATEGORIES ─────────────────────────────────────────
 app.get('/api/mother-categories', async (req, res) => {
   try {
-    const cats = await MotherCategory.find({ active: true }).sort({ order: 1, position: 1 }).lean();
+    const cats = await MotherCategory.find({}).sort({ order: 1, position: 1 }).lean();
     res.json({ success: true, categories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -868,7 +868,7 @@ app.delete('/api/fresh-categories/:id', async (req, res) => {
 app.get('/api/sub-categories', async (req, res) => {
   try {
     const { categoryId, motherCategoryId, shopCategoryId, parentType } = req.query;
-    const filter = { active: true };
+    const filter = {};
     if (categoryId)       filter.categoryId       = categoryId;
     if (motherCategoryId) filter.motherCategoryId = motherCategoryId;
     if (shopCategoryId)   filter.shopCategoryId   = shopCategoryId;
@@ -1764,7 +1764,7 @@ app.get('/api/reports/weekly', async (req, res) => {
 // ── FEATURED SECTIONS ─────────────────────────────────────────
 app.get('/api/featured-section', async (req, res) => {
   try {
-    const section = await FeaturedSection.findOne({ active: true }).populate('products');
+    const section = await FeaturedSection.findOne({}).populate('products');
     res.json({ success: true, section: section || null });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
