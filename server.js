@@ -910,10 +910,24 @@ app.delete('/api/sub-categories/:id', async (req, res) => {
 // ── SECTIONS ──────────────────────────────────────────────────
 app.get('/api/sections', async (req, res) => {
   try {
-    const filter = req.query.all === 'true' ? {} : { active: true };
-    const sections = await Section.find(filter).sort({ position: 1, createdAt: -1 }).lean();
-    res.json({ success: true, sections });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    const sections = await Section.find({ active: true }).sort({ position: 1 });
+    const products = await Product.find({});
+
+    const sectionsWithProducts = sections.map(section => {
+      const sectionProducts = products.filter(p =>
+        p.sectionName === section.name ||
+        p.sectionId === section.sectionId
+      );
+      return {
+        ...section.toObject(),
+        products: sectionProducts
+      };
+    });
+
+    res.json({ success: true, sections: sectionsWithProducts });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 app.post('/api/sections', async (req, res) => {
   try {
