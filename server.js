@@ -418,6 +418,14 @@ const BroadcastSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Broadcast = mongoose.model('Broadcast', BroadcastSchema);
 
+const RatingSchema = new mongoose.Schema({
+  productId: { type: String, required: true },
+  userEmail: { type: String, required: true },
+  rating:    { type: Number, required: true, min: 1, max: 5 },
+  orderId:   { type: String },
+}, { timestamps: true });
+const Rating = mongoose.model('Rating', RatingSchema);
+
 // ── OTP STORE ─────────────────────────────────────────────────
 const otpStore = {};
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -2218,6 +2226,42 @@ app.delete('/api/broadcasts/:id', async (req, res) => {
     await Broadcast.findByIdAndDelete(req.params.id)
     res.json({ success: true })
   } catch(err) {
+    res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// ── RATINGS ───────────────────────────────────────────────────
+app.post('/api/ratings', async (req, res) => {
+  try {
+    const { productId, userEmail, rating, orderId } = req.body
+    const existing = await Rating.findOne({ productId, userEmail })
+    if (existing) {
+      existing.rating = rating
+      await existing.save()
+    } else {
+      await new Rating({ productId, userEmail, rating, orderId }).save()
+    }
+    const allRatings = await Rating.find({ productId })
+    const avg = allRatings.reduce((sum, r) => sum + r.rating, 0) / allRatings.length
+    const avgRating = Math.round(avg * 10) / 10
+    await Product.findByIdAndUpdate(productId, {
+      rating:      avgRating,
+      ratingCount: allRatings.length,
+    })
+    res.json({ success: true, avgRating, totalRatings: allRatings.length })
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+app.get('/api/ratings/:productId/:userEmail', async (req, res) => {
+  try {
+    const found = await Rating.findOne({
+      productId: req.params.productId,
+      userEmail: req.params.userEmail,
+    })
+    res.json({ success: true, rating: found?.rating || 0 })
+  } catch (err) {
     res.status(500).json({ success: false, message: err.message })
   }
 })
