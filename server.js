@@ -189,6 +189,7 @@ const StaffSchema = new mongoose.Schema({
   ifsc:               String,
   bankIfsc:           String,
   bankName:           String,
+  branchName:         String,
   bankPassbookImage:  String,
   totalOrdersHandled: { type: Number, default: 0 },
   totalEarnings:      { type: Number, default: 0 },
@@ -1487,7 +1488,7 @@ app.post('/api/staff', async (req, res) => {
   try {
     const phone = req.body.phone || req.body.mobile;
     const exists = await Staff.findOne({ $or: [{ phone }, { mobile: phone }].filter(x => Object.values(x)[0]) });
-    if (exists) return res.json({ success: false, message: 'Phone already registered' });
+    if (exists) return res.json({ success: false, message: 'Phone number already registered' });
     const staffId = await generateStaffId(req.body.role || 'Picker');
     const staff = new Staff({ ...req.body, phone: phone || req.body.phone, staffId });
     await staff.save();
@@ -1530,7 +1531,7 @@ app.post('/api/staff/login', async (req, res) => {
     const { phone, password } = req.body;
     const staff = await Staff.findOne({ $or: [{ phone }, { mobile: phone }], password, active: true }).lean();
     if (!staff) return res.json({ success: false, message: 'Phone ya password galat hai' });
-    res.json({ success: true, staff });
+    res.json({ success: true, staff: { _id: staff._id, name: staff.name, phone: staff.phone, role: staff.role } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.get('/api/staff/:id/earnings', async (req, res) => {
