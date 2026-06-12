@@ -169,6 +169,7 @@ const UserSchema = new mongoose.Schema({
   email:     { type: String, unique: true, sparse: true },
   password:  String,
   addresses: Array,
+  pushToken: { type: String, default: '' },
 }, { timestamps: true });
 
 const StaffSchema = new mongoose.Schema({
@@ -2115,6 +2116,49 @@ app.get('/api/auth/create-test-user', async (req, res) => {
   }
 })
 
+// ── Push notification helper ──────────────────────────────────
+const sendPushNotification = async (tokens, title, body, data = {}) => {
+  if (!tokens || tokens.length === 0) return;
+  const messages = tokens.map(token => ({
+    to:        token,
+    sound:     'default',
+    title:     title,
+    body:      body,
+    data:      data,
+    priority:  'high',
+    channelId: 'default',
+  }));
+  try {
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method:  'POST',
+      headers: {
+        'Content-Type':    'application/json',
+        'Accept':          'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+      },
+      body: JSON.stringify(messages),
+    });
+    const result = await response.json();
+    console.log('Push notification sent:', result);
+  } catch (err) {
+    console.log('Push notification error:', err.message);
+  }
+};
+
+app.post('/api/users/push-token', async (req, res) => {
+  try {
+    const { email, pushToken } = req.body;
+    await User.findOneAndUpdate(
+      { $or: [{ email }, { phone: email }] },
+      { pushToken },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.get('/api/broadcasts', async (req, res) => {
   try {
     const messages = await Broadcast.find({})
@@ -2136,6 +2180,20 @@ app.post('/api/broadcasts', async (req, res) => {
       imageUrl: imageUrl || ''
     })
     await broadcast.save()
+
+    // Emit socket event
+    io.emit('new_broadcast', broadcast)
+
+    // Send push notification to all users with a token
+    const users  = await User.find({ pushToken: { $ne: '' } }).lean()
+    const tokens = users.map(u => u.pushToken).filter(Boolean)
+    await sendPushNotification(
+      tokens,
+      'Quick10 🛒',
+      message.substring(0, 100),
+      { type: 'broadcast', broadcastId: String(broadcast._id) }
+    )
+
     res.json({ success: true, broadcast })
   } catch(err) {
     res.status(500).json({ success: false, message: err.message })
