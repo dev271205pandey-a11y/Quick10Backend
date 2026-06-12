@@ -157,6 +157,10 @@ const OrderSchema = new mongoose.Schema({
     lng:       Number,
     updatedAt: Date,
   },
+  customerLocation: {
+    lat: { type: Number, default: 27.4244 },
+    lng: { type: Number, default: 82.1833 },
+  },
 }, { timestamps: true });
 
 const UserSchema = new mongoose.Schema({
