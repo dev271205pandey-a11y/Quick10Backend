@@ -1463,6 +1463,15 @@ const generateStaffId = async (role) => {
   return `${prefix}_${String(count + 1).padStart(3, '0')}`;
 };
 
+app.delete('/api/staff/delete-all', async (req, res) => {
+  try {
+    await Staff.deleteMany({});
+    res.json({ success: true, message: 'All staff deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.get('/api/staff', async (req, res) => {
   try { const staff = await Staff.find({}).sort({ createdAt: -1 }).lean(); res.json({ success: true, staff }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
