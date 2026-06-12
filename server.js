@@ -1506,6 +1506,18 @@ app.delete('/api/staff/:id', async (req, res) => {
   try { await Staff.findByIdAndDelete(req.params.id); res.json({ success: true, message: 'Deleted' }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+app.get('/api/staff/delete-test/:id', async (req, res) => {
+  try {
+    const result = await Staff.findByIdAndDelete(req.params.id);
+    if (result) {
+      res.json({ success: true, message: 'Deleted', staff: result.name });
+    } else {
+      res.json({ success: false, message: 'Staff not found with id: ' + req.params.id });
+    }
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
 app.put('/api/staff/:id/availability', async (req, res) => {
   try {
     const staff = await Staff.findByIdAndUpdate(req.params.id, { available: req.body.available, isAvailable: req.body.available }, { new: true });
