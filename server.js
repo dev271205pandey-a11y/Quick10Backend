@@ -1541,10 +1541,34 @@ app.put('/api/staff/:id/toggle-status', async (req, res) => {
 app.post('/api/staff/login', async (req, res) => {
   try {
     const { phone, password } = req.body;
-    const staff = await Staff.findOne({ $or: [{ phone }, { mobile: phone }], password, active: true }).lean();
-    if (!staff) return res.json({ success: false, message: 'Phone ya password galat hai' });
-    res.json({ success: true, staff: { _id: staff._id, name: staff.name, phone: staff.phone, role: staff.role } });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+
+    if (!phone || !password) {
+      return res.json({ success: false, message: 'Phone and password required' });
+    }
+
+    const staff = await Staff.findOne({ phone: phone.trim() });
+
+    if (!staff) {
+      return res.json({ success: false, message: 'Staff not found with this phone number' });
+    }
+
+    if (staff.password !== password.trim()) {
+      return res.json({ success: false, message: 'Wrong password' });
+    }
+
+    res.json({
+      success: true,
+      staff: {
+        _id: staff._id,
+        name: staff.name,
+        phone: staff.phone,
+        role: staff.role,
+        staffId: staff.staffId
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 app.get('/api/staff/:id/earnings', async (req, res) => {
   try {
