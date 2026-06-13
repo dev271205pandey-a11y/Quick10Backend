@@ -180,6 +180,7 @@ const StaffSchema = new mongoose.Schema({
   role:               { type: String, default: 'Picker' },
   staffId:            String,
   profilePhoto:       String,
+  aboutText:          String,
   available:          { type: Boolean, default: false },
   isAvailable:        { type: Boolean, default: true },
   vehicleType:        String,
