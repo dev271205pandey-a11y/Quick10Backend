@@ -1057,7 +1057,11 @@ app.get('/api/fresh-section', async (req, res) => {
 // ── ORDERS ────────────────────────────────────────────────────
 app.get('/api/orders', async (req, res) => {
   try {
-    const orders = await Order.find({}).sort({ createdAt: -1 }).lean();
+    const filter = {};
+    if (req.query.status)            filter.status            = req.query.status;
+    if (req.query.deliveryPartnerId) filter.deliveryPartnerId = req.query.deliveryPartnerId;
+    if (req.query.userPhone)         filter.userPhone         = req.query.userPhone;
+    const orders = await Order.find(filter).sort({ createdAt: -1 }).lean();
     res.json({ success: true, orders });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1528,8 +1532,14 @@ app.post('/api/staff', async (req, res) => {
 });
 app.put('/api/staff/:id', async (req, res) => {
   try {
-    const staff = await Staff.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true });
-    if (!staff) return res.status(404).json({ success: false, message: 'Not found' });
+    const updateFields = {};
+    const allowed = ['name', 'phone', 'password', 'role', 'aadhaarNumber', 'panNumber',
+      'bankName', 'branchName', 'accountNo', 'ifsc', 'bio', 'isActive', 'isAvailable'];
+    allowed.forEach(field => {
+      if (req.body[field] !== undefined) updateFields[field] = req.body[field];
+    });
+    const staff = await Staff.findByIdAndUpdate(req.params.id, { $set: updateFields }, { new: true });
+    if (!staff) return res.status(404).json({ success: false, message: 'Staff not found' });
     res.json({ success: true, staff });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
