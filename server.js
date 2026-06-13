@@ -1491,6 +1491,22 @@ app.get('/api/staff', async (req, res) => {
   try { const staff = await Staff.find({}).sort({ createdAt: -1 }).lean(); res.json({ success: true, staff }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+app.get('/api/delivery-partners/:id', async (req, res) => {
+  try {
+    const partner = await Staff.findById(req.params.id).lean();
+    if (!partner) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({
+      success: true,
+      partner: {
+        _id:             partner._id,
+        name:            partner.name,
+        phone:           partner.phone,
+        profileImageUrl: partner.profilePhoto || '',
+        aboutText:       partner.aboutText    || '',
+      },
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
 app.get('/api/staff/:id', async (req, res) => {
   try {
     const staff = await Staff.findById(req.params.id).lean();
