@@ -181,6 +181,7 @@ const StaffSchema = new mongoose.Schema({
   staffId:            String,
   profilePhoto:       String,
   aboutText:          String,
+  bio:                String,
   available:          { type: Boolean, default: false },
   isAvailable:        { type: Boolean, default: true },
   vehicleType:        String,
