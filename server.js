@@ -578,6 +578,20 @@ app.get('/api/debug', async (req, res) => {
   }
 });
 
+app.get('/api/debug/fix-stuck-order', async (req, res) => {
+  try {
+    const order = await Order.findById('6a2d3a05d53f94db55e4e807');
+    if (order) {
+      order.currentlyNotifying = null;
+      await order.save();
+      return res.json({ success: true, message: 'Fixed', order });
+    }
+    res.json({ success: false, message: 'Order not found' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ── HEALTH ────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'OK', message: 'Backend is running!' }));
 
@@ -1268,7 +1282,9 @@ app.put('/api/orders/:id/reject-delivery', async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
 
+    // Immediately clear currentlyNotifying so the polling loop doesn't re-notify this partner
     const rejectedBy = [...(order.rejectedBy || []), partnerId];
+    await Order.findByIdAndUpdate(req.params.id, { rejectedBy, currentlyNotifying: null });
 
     const rejectedIds = rejectedBy
       .filter(id => mongoose.Types.ObjectId.isValid(id))
@@ -1289,11 +1305,7 @@ app.put('/api/orders/:id/reject-delivery', async (req, res) => {
     });
 
     if (!nextPartner) {
-      await Order.findByIdAndUpdate(req.params.id, {
-        status: 'unassigned',
-        rejectedBy,
-        currentlyNotifying: null,
-      });
+      await Order.findByIdAndUpdate(req.params.id, { status: 'unassigned' });
       io.to('warehouse_admin').emit('manual_assign_needed', {
         orderId: order._id,
         message: 'Sabhi partners ne reject kiya! Manual assign karo!',
@@ -1303,7 +1315,6 @@ app.put('/api/orders/:id/reject-delivery', async (req, res) => {
 
     // Update deliveryPartnerId to next partner so polling fallback in delivery app can find the order
     await Order.findByIdAndUpdate(req.params.id, {
-      rejectedBy,
       currentlyNotifying:   nextPartner._id.toString(),
       deliveryPartnerId:    nextPartner._id.toString(),
       deliveryPartnerName:  nextPartner.name,
@@ -1331,18 +1342,19 @@ app.put('/api/orders/:id/assign-partner', async (req, res) => {
     const partner = await Staff.findById(resolvedId);
     if (!partner) return res.status(404).json({ success: false, message: 'Partner not found' });
 
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      {
-        deliveryPartnerId:    resolvedId,
-        deliveryPartnerName:  req.body.deliveryPartnerName || req.body.partnerName || partner.name,
-        deliveryPartnerPhone: req.body.partnerPhone || partner.phone,
-        currentlyNotifying:   resolvedId,
-        status:               'ready_pickup',
-      },
-      { new: true }
-    );
+    const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
+
+    // Remove this partner from rejectedBy in case they were previously rejected (allows re-assignment)
+    order.rejectedBy = (order.rejectedBy || []).filter(
+      id => String(id) !== String(resolvedId)
+    );
+    order.currentlyNotifying   = String(resolvedId);
+    order.deliveryPartnerId    = String(resolvedId);
+    order.deliveryPartnerName  = req.body.deliveryPartnerName || req.body.partnerName || partner.name;
+    order.deliveryPartnerPhone = req.body.partnerPhone || partner.phone;
+    order.status               = 'ready_pickup';
+    await order.save();
 
     console.log('Emitting new_order_available to room: delivery_' + resolvedId);
     io.to('delivery_' + resolvedId).emit('new_order_available', {
