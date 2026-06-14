@@ -1122,14 +1122,21 @@ app.put('/api/orders/:id/accept-packing', async (req, res) => {
     };
 
     if (partner) {
-      await Order.findByIdAndUpdate(order._id, {
+      const updatedOrder = await Order.findByIdAndUpdate(order._id, {
         deliveryPartnerId:    partner._id.toString(),
         deliveryPartnerName:  partner.name,
         deliveryPartnerPhone: partner.phone || partner.mobile,
+      }, { new: true });
+      console.log('Auto-notifying partner:', partner._id.toString(), 'room: delivery_' + partner._id.toString());
+      io.to('delivery_' + partner._id.toString()).emit('new_order_available', {
+        order: updatedOrder || order,
+        earning: order.earningAmount || 30,
       });
-      io.to('delivery_' + partner._id.toString()).emit('new_order_available', payload);
     } else {
-      io.to('delivery_available').emit('new_order_available', payload);
+      io.to('delivery_available').emit('new_order_available', {
+        order,
+        earning: order.earningAmount || 30,
+      });
     }
 
     res.json({ success: true, order });
@@ -1229,7 +1236,8 @@ app.put('/api/orders/:id/notify-partners', async (req, res) => {
 // Delivery partner accepts delivery
 app.put('/api/orders/:id/accept-delivery', async (req, res) => {
   try {
-    const { deliveryPartnerId, partnerName } = req.body;
+    const { deliveryPartnerId, deliveryPartnerName, deliveryPartnerPhone, partnerName } = req.body;
+    const resolvedName  = deliveryPartnerName || partnerName;
     const existing = await Order.findById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, message: 'Not found' });
     if (existing.deliveryPartnerId && existing.deliveryPartnerId !== deliveryPartnerId) {
@@ -1237,7 +1245,13 @@ app.put('/api/orders/:id/accept-delivery', async (req, res) => {
     }
     const order = await Order.findByIdAndUpdate(
       req.params.id,
-      { deliveryPartnerId, deliveryPartnerName: partnerName, assignedTo: deliveryPartnerId, assignedName: partnerName },
+      {
+        deliveryPartnerId,
+        deliveryPartnerName:  resolvedName,
+        deliveryPartnerPhone: deliveryPartnerPhone || existing.deliveryPartnerPhone,
+        assignedTo:   deliveryPartnerId,
+        assignedName: resolvedName,
+      },
       { new: true }
     );
     emitOrderUpdate(order);
@@ -1287,14 +1301,22 @@ app.put('/api/orders/:id/reject-delivery', async (req, res) => {
       return res.json({ success: true, message: 'No partners available' });
     }
 
-    setTimeout(() => {
-      io.to('delivery_' + nextPartner._id).emit('new_order_available', { order, earning: 30 });
-    }, 1000);
-
+    // Update deliveryPartnerId to next partner so polling fallback in delivery app can find the order
     await Order.findByIdAndUpdate(req.params.id, {
       rejectedBy,
-      currentlyNotifying: nextPartner._id.toString(),
+      currentlyNotifying:   nextPartner._id.toString(),
+      deliveryPartnerId:    nextPartner._id.toString(),
+      deliveryPartnerName:  nextPartner.name,
+      deliveryPartnerPhone: nextPartner.phone,
     });
+
+    setTimeout(async () => {
+      const freshOrder = await Order.findById(req.params.id).lean();
+      io.to('delivery_' + nextPartner._id).emit('new_order_available', {
+        order: freshOrder,
+        earning: freshOrder?.earningAmount || 30,
+      });
+    }, 1000);
 
     res.json({ success: true, nextPartner: nextPartner.name });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -1507,8 +1529,14 @@ app.delete('/api/staff/delete-all', async (req, res) => {
 });
 
 app.get('/api/staff', async (req, res) => {
-  try { const staff = await Staff.find({}).sort({ createdAt: -1 }).lean(); res.json({ success: true, staff }); }
-  catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  try {
+    const filter = {};
+    if (req.query.role)        filter.role        = req.query.role;
+    if (req.query.isAvailable) filter.isAvailable = req.query.isAvailable === 'true';
+    if (req.query.active)      filter.active      = req.query.active      === 'true';
+    const staff = await Staff.find(filter).sort({ createdAt: -1 }).lean();
+    res.json({ success: true, staff });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.get('/api/delivery-partners/:id', async (req, res) => {
   try {
