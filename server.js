@@ -555,6 +555,14 @@ io.on('connection', (socket) => {
 });
 
 // ── DEBUG ─────────────────────────────────────────────────────
+app.get('/api/debug/rooms', (req, res) => {
+  const roomList = {};
+  io.sockets.adapter.rooms.forEach((sockets, roomName) => {
+    roomList[roomName] = sockets.size;
+  });
+  res.json({ rooms: roomList });
+});
+
 app.get('/api/debug', async (req, res) => {
   try {
     const count = await Product.countDocuments({});
@@ -1295,32 +1303,38 @@ app.put('/api/orders/:id/reject-delivery', async (req, res) => {
 // Admin manually assigns delivery partner → emit new_order_available directly to that partner
 app.put('/api/orders/:id/assign-partner', async (req, res) => {
   try {
-    const { partnerId } = req.body;
+    // Accept both field name conventions (warehouse app uses both)
+    const resolvedId = req.body.deliveryPartnerId || req.body.partnerId;
 
-    const partner = await Staff.findById(partnerId);
+    const partner = await Staff.findById(resolvedId);
     if (!partner) return res.status(404).json({ success: false, message: 'Partner not found' });
 
     const order = await Order.findByIdAndUpdate(
       req.params.id,
       {
-        deliveryPartnerId:    partnerId,
-        deliveryPartnerName:  partner.name,
-        deliveryPartnerPhone: partner.phone,
-        currentlyNotifying:   partnerId,
+        deliveryPartnerId:    resolvedId,
+        deliveryPartnerName:  req.body.deliveryPartnerName || req.body.partnerName || partner.name,
+        deliveryPartnerPhone: req.body.partnerPhone || partner.phone,
+        currentlyNotifying:   resolvedId,
+        status:               'ready_pickup',
       },
       { new: true }
     );
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
 
-    io.to('delivery_' + partnerId).emit('new_order_available', {
+    console.log('Emitting new_order_available to room: delivery_' + resolvedId);
+    io.to('delivery_' + resolvedId).emit('new_order_available', {
       order,
-      earning: 30,
+      earning: order.earningAmount || 30,
       isManualAssign: true,
     });
 
     io.to('warehouse_admin').emit('order_update', order);
     res.json({ success: true, order });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) {
+    console.log('Assign partner error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // Location update
