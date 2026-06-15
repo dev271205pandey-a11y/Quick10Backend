@@ -3,7 +3,8 @@ const express = require('express');
 const compression = require('compression');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const http = require('http');
+const http  = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const cloudinary = require('cloudinary').v2;
 const bcrypt = require('bcryptjs');
@@ -158,8 +159,8 @@ const OrderSchema = new mongoose.Schema({
     updatedAt: Date,
   },
   customerLocation: {
-    lat: { type: Number, default: 27.4244 },
-    lng: { type: Number, default: 82.1833 },
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null },
   },
 }, { timestamps: true });
 
@@ -203,6 +204,8 @@ const StaffSchema = new mongoose.Schema({
   currentOrderId:     String,
   active:             { type: Boolean, default: true },
   isActive:           { type: Boolean, default: true },
+  isOnline:           { type: Boolean, default: false },
+  lastAssignedAt:     { type: Date,    default: null },
 }, { timestamps: true });
 
 const PayoutSchema = new mongoose.Schema({
@@ -428,6 +431,31 @@ const RatingSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Rating = mongoose.model('Rating', RatingSchema);
 
+// ── GEOCODING ─────────────────────────────────────────────────
+async function geocodeAddress(addressText) {
+  if (!addressText || !addressText.trim()) return null;
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+    + encodeURIComponent(addressText.trim());
+  return new Promise((resolve) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'Quick10App' } }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const results = JSON.parse(data);
+          if (Array.isArray(results) && results.length > 0) {
+            resolve({ lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) });
+          } else {
+            resolve(null);
+          }
+        } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(6000, () => { req.destroy(); resolve(null); });
+  });
+}
+
 // ── OTP STORE ─────────────────────────────────────────────────
 const otpStore = {};
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -450,6 +478,58 @@ const emitOrderUpdate = (order) => {
     io.to('delivery_' + order.deliveryPartnerId).emit('order_update', order);
   }
 };
+
+// Round-robin auto-assign: pick the delivery_partner with the oldest lastAssignedAt
+// (no isOnline filter — availability is tracked via isAvailable only for now).
+// lastAssignedAt is stamped at NOTIFY time so rejections correctly push that partner
+// to the back of the queue for the next order.
+async function assignNextPartner(order) {
+  const rejectedIds = (order.rejectedBy || [])
+    .filter(id => mongoose.Types.ObjectId.isValid(String(id)))
+    .map(id => new mongoose.Types.ObjectId(String(id)));
+
+  const eligible = await Staff.find({
+    role:        'delivery_partner',
+    isActive:    true,
+    isAvailable: true,
+    _id:         { $nin: rejectedIds },
+  }).lean();
+
+  if (eligible.length === 0) {
+    order.currentlyNotifying = null;
+    await order.save();
+    io.to('warehouse_admin').emit('no_partners_available', { orderId: order._id });
+    return null;
+  }
+
+  // Sort ascending: null lastAssignedAt → epoch 0 → highest priority
+  eligible.sort((a, b) => {
+    const ta = a.lastAssignedAt ? new Date(a.lastAssignedAt).getTime() : 0;
+    const tb = b.lastAssignedAt ? new Date(b.lastAssignedAt).getTime() : 0;
+    return ta - tb;
+  });
+
+  const nextPartner = eligible[0];
+
+  // Stamp lastAssignedAt NOW (notify time), not on accept
+  await Staff.findByIdAndUpdate(nextPartner._id, { lastAssignedAt: new Date() });
+
+  order.currentlyNotifying   = nextPartner._id;
+  order.deliveryPartnerId    = nextPartner._id.toString();
+  order.deliveryPartnerName  = nextPartner.name;
+  order.deliveryPartnerPhone = nextPartner.phone;
+  await order.save();
+
+  const freshOrder = await Order.findById(order._id).lean();
+  io.to('delivery_' + nextPartner._id.toString()).emit('new_order_available', {
+    order:   freshOrder,
+    earning: freshOrder?.earningAmount || 30,
+  });
+
+  console.log(`[ASSIGN] Order ${order._id} → ${nextPartner.name} (${nextPartner._id}) | lastAssignedAt: ${new Date().toISOString()}`);
+
+  return nextPartner;
+}
 
 io.on('connection', (socket) => {
   console.log('Connected:', socket.id);
@@ -1089,7 +1169,24 @@ app.get('/api/orders', async (req, res) => {
 });
 app.post('/api/orders', async (req, res) => {
   try {
-    const order = new Order({ ...req.body, orderId: 'ORD' + Date.now() });
+    const body = { ...req.body, orderId: 'ORD' + Date.now() };
+
+    // Auto-geocode customer address when customerLocation not sent by client
+    const hasCustLoc = req.body.customerLocation?.lat && req.body.customerLocation?.lng;
+    if (!hasCustLoc) {
+      const addr = req.body.address || {};
+      const addrText = typeof addr === 'string'
+        ? addr
+        : addr.fullAddress ||
+          [addr.flat || addr.houseNo, addr.landmark, addr.area, addr.city, addr.pincode]
+            .filter(Boolean).join(', ');
+      if (addrText) {
+        const geo = await geocodeAddress(addrText);
+        if (geo) body.customerLocation = geo;
+      }
+    }
+
+    const order = new Order(body);
     await order.save();
     io.to('warehouse_admin').emit('new_order', order);
     res.json({ success: true, order });
@@ -1106,7 +1203,7 @@ app.get('/api/orders/:id', async (req, res) => {
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Picker accepts order → status: packing, find & notify first available delivery partner
+// Picker accepts order → status: packing, notify next eligible delivery partner (round-robin)
 app.put('/api/orders/:id/accept-packing', async (req, res) => {
   try {
     const { pickerId, pickerName } = req.body;
@@ -1118,38 +1215,11 @@ app.put('/api/orders/:id/accept-packing', async (req, res) => {
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
     emitOrderUpdate(order);
 
-    const partner = await Staff.findOne({
-      role: { $in: ['Rider', 'rider', 'delivery_partner', 'delivery'] },
-      isAvailable: true, currentOrderId: null, active: true,
-    });
-
-    const payload = {
-      orderId:         order._id,
-      orderDisplayId:  order.orderId,
-      customerName:    order.address?.name,
-      customerPhone:   order.address?.mobile,
-      customerAddress: order.address,
-      items:           order.items,
-      total:           order.total,
-      paymentMethod:   order.paymentMethod,
-      earningAmount:   order.earningAmount || 30,
-    };
-
-    if (partner) {
-      const updatedOrder = await Order.findByIdAndUpdate(order._id, {
-        deliveryPartnerId:    partner._id.toString(),
-        deliveryPartnerName:  partner.name,
-        deliveryPartnerPhone: partner.phone || partner.mobile,
-      }, { new: true });
-      console.log('Auto-notifying partner:', partner._id.toString(), 'room: delivery_' + partner._id.toString());
-      io.to('delivery_' + partner._id.toString()).emit('new_order_available', {
-        order: updatedOrder || order,
-        earning: order.earningAmount || 30,
-      });
-    } else {
-      io.to('delivery_available').emit('new_order_available', {
-        order,
-        earning: order.earningAmount || 30,
+    const partner = await assignNextPartner(order);
+    if (!partner) {
+      io.to('warehouse_admin').emit('no_partners_available', {
+        orderId: order._id,
+        message: 'Koi available delivery partner nahi hai!',
       });
     }
 
@@ -1157,7 +1227,9 @@ app.put('/api/orders/:id/accept-packing', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Picker done packing → status: ready_pickup, find & notify available delivery partners
+// Picker done packing → status: ready_pickup
+// If a partner already accepted this order, just notify them via order_update.
+// If no partner yet, run round-robin to find and notify the next eligible one.
 app.put('/api/orders/:id/ready-pickup', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(
@@ -1167,25 +1239,20 @@ app.put('/api/orders/:id/ready-pickup', async (req, res) => {
     );
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
 
-    const availablePartners = await Staff.find({
-      role: 'delivery_partner',
-      isActive: true,
-      isAvailable: true,
-      currentOrderId: null,
-    });
-
-    if (availablePartners.length === 0) {
-      io.to('warehouse_admin').emit('no_partners_available', {
-        orderId: order._id,
-        message: 'Koi delivery partner available nahi hai!',
-      });
+    if (order.deliveryPartnerId) {
+      // Partner already on this order — just push the status change to their screen
+      emitOrderUpdate(order);
     } else {
-      const firstPartner = availablePartners[0];
-      io.to('delivery_' + firstPartner._id).emit('new_order_available', { order, earning: 30 });
-      await Order.findByIdAndUpdate(order._id, {
-        currentlyNotifying: firstPartner._id.toString(),
-        rejectedBy: [],
-      });
+      // No partner yet — reset rejectedBy and find the first eligible one
+      order.rejectedBy = [];
+      await order.save();
+      const partner = await assignNextPartner(order);
+      if (!partner) {
+        io.to('warehouse_admin').emit('no_partners_available', {
+          orderId: order._id,
+          message: 'Koi available delivery partner nahi hai!',
+        });
+      }
     }
 
     io.to('warehouse_admin').emit('order_update', order);
@@ -1270,11 +1337,19 @@ app.put('/api/orders/:id/accept-delivery', async (req, res) => {
     );
     emitOrderUpdate(order);
     if (onlineDeliveryPartners[deliveryPartnerId]) onlineDeliveryPartners[deliveryPartnerId].busy = true;
+    // Mark partner busy in DB
+    if (deliveryPartnerId) {
+      await Staff.findByIdAndUpdate(deliveryPartnerId, {
+        isAvailable:   false,
+        available:     false,
+        currentOrderId: order._id.toString(),
+      });
+    }
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Delivery partner rejects delivery → notify next available partner
+// Delivery partner rejects delivery → notify next partner (round-robin via assignNextPartner)
 app.put('/api/orders/:id/reject-delivery', async (req, res) => {
   try {
     const { partnerId, partnerName } = req.body;
@@ -1282,54 +1357,29 @@ app.put('/api/orders/:id/reject-delivery', async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
 
-    // Immediately clear currentlyNotifying so the polling loop doesn't re-notify this partner
-    const rejectedBy = [...(order.rejectedBy || []), partnerId];
-    await Order.findByIdAndUpdate(req.params.id, { rejectedBy, currentlyNotifying: null });
-
-    const rejectedIds = rejectedBy
-      .filter(id => mongoose.Types.ObjectId.isValid(id))
-      .map(id => new mongoose.Types.ObjectId(id));
-
-    const nextPartner = await Staff.findOne({
-      role: 'delivery_partner',
-      isActive: true,
-      isAvailable: true,
-      currentOrderId: null,
-      _id: { $nin: rejectedIds },
-    });
+    // Add to rejectedBy (dedup), clear currentlyNotifying, then save
+    if (!order.rejectedBy.map(String).includes(String(partnerId))) {
+      order.rejectedBy.push(String(partnerId));
+    }
+    order.currentlyNotifying = null;
+    await order.save();
 
     io.to('warehouse_admin').emit('partner_rejected', {
       orderId: order._id,
       partnerName,
-      message: partnerName + ' ne order reject kar diya!',
+      message: (partnerName || 'Partner') + ' ne order reject kar diya!',
     });
+
+    const nextPartner = await assignNextPartner(order);
 
     if (!nextPartner) {
-      await Order.findByIdAndUpdate(req.params.id, { status: 'unassigned' });
       io.to('warehouse_admin').emit('manual_assign_needed', {
         orderId: order._id,
-        message: 'Sabhi partners ne reject kiya! Manual assign karo!',
+        message: 'Koi available partner nahi hai! Manual assign karo!',
       });
-      return res.json({ success: true, message: 'No partners available' });
     }
 
-    // Update deliveryPartnerId to next partner so polling fallback in delivery app can find the order
-    await Order.findByIdAndUpdate(req.params.id, {
-      currentlyNotifying:   nextPartner._id.toString(),
-      deliveryPartnerId:    nextPartner._id.toString(),
-      deliveryPartnerName:  nextPartner.name,
-      deliveryPartnerPhone: nextPartner.phone,
-    });
-
-    setTimeout(async () => {
-      const freshOrder = await Order.findById(req.params.id).lean();
-      io.to('delivery_' + nextPartner._id).emit('new_order_available', {
-        order: freshOrder,
-        earning: freshOrder?.earningAmount || 30,
-      });
-    }, 1000);
-
-    res.json({ success: true, nextPartner: nextPartner.name });
+    res.json({ success: true, nextPartner: nextPartner?.name || null });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1383,6 +1433,29 @@ app.put('/api/orders/:id/location', async (req, res) => {
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
     io.to('customer_' + order.userPhone).emit('location_update', { lat, lng, orderId: req.params.id });
     res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Backfill geocoded customerLocation for existing orders that have missing/default coords
+app.put('/api/orders/:id/geocode-address', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    const addr = order.address || {};
+    const addrText = typeof addr === 'string'
+      ? addr
+      : addr.fullAddress ||
+        [addr.flat || addr.houseNo, addr.landmark, addr.area, addr.city, addr.pincode]
+          .filter(Boolean).join(', ');
+
+    if (!addrText) return res.json({ success: false, message: 'No address found on order' });
+
+    const geo = await geocodeAddress(addrText);
+    if (!geo) return res.json({ success: false, message: 'Geocoding failed — address not found' });
+
+    await Order.findByIdAndUpdate(req.params.id, { customerLocation: geo });
+    res.json({ success: true, customerLocation: geo, address: addrText });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1489,6 +1562,16 @@ app.put('/api/delivery/update-location', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── TEMP DEBUG (remove after use) ─────────────────────────────
+app.get('/api/staff/debug-all', async (req, res) => {
+  try {
+    const allStaff = await Staff.find({})
+      .select('_id name phone role isActive isOnline isAvailable currentOrderId lastAssignedAt')
+      .lean();
+    res.json({ success: true, count: allStaff.length, staff: allStaff });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── USERS ─────────────────────────────────────────────────────
 app.get('/api/users/:phone', async (req, res) => {
   try {
@@ -1566,6 +1649,30 @@ app.get('/api/delivery-partners/:id', async (req, res) => {
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+// Debug: see rotation state for all delivery partners
+app.get('/api/staff/debug-rotation', async (req, res) => {
+  try {
+    const partners = await Staff.find(
+      { role: 'delivery_partner' },
+      'name isActive isAvailable isOnline lastAssignedAt currentOrderId'
+    ).sort({ lastAssignedAt: 1 }).lean();
+
+    res.json({
+      success: true,
+      count: partners.length,
+      partners: partners.map(p => ({
+        name:           p.name,
+        isActive:       p.isActive,
+        isAvailable:    p.isAvailable,
+        isOnline:       p.isOnline,
+        currentOrderId: p.currentOrderId || null,
+        lastAssignedAt: p.lastAssignedAt || null,
+        nextInLine:     !p.lastAssignedAt ? '★ FIRST' : undefined,
+      })),
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 app.get('/api/staff/:id', async (req, res) => {
   try {
     const staff = await Staff.findById(req.params.id).lean();
@@ -1631,6 +1738,23 @@ app.put('/api/staff/:id/toggle-status', async (req, res) => {
     staff.available   = staff.isAvailable;
     await staff.save();
     res.json({ success: true, isAvailable: staff.isAvailable, staff });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Delivery partner online/offline toggle (called from delivery app)
+app.put('/api/staff/:id/online-status', async (req, res) => {
+  try {
+    const { isOnline } = req.body;
+    if (typeof isOnline !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'isOnline (boolean) required' });
+    }
+    const staff = await Staff.findByIdAndUpdate(
+      req.params.id,
+      { isOnline, ...(isOnline ? {} : { isAvailable: false, available: false }) },
+      { new: true }
+    );
+    if (!staff) return res.status(404).json({ success: false, message: 'Staff not found' });
+    res.json({ success: true, isOnline: staff.isOnline, staff });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.post('/api/staff/login', async (req, res) => {
