@@ -480,9 +480,7 @@ const emitOrderUpdate = (order) => {
 };
 
 // Round-robin auto-assign: pick the delivery_partner with the oldest lastAssignedAt
-// (no isOnline filter — availability is tracked via isAvailable only for now).
-// lastAssignedAt is stamped at NOTIFY time so rejections correctly push that partner
-// to the back of the queue for the next order.
+// isOnline: true = partner is active in the app; isAvailable: true = not on a delivery
 async function assignNextPartner(order) {
   const rejectedIds = (order.rejectedBy || [])
     .filter(id => mongoose.Types.ObjectId.isValid(String(id)))
@@ -491,6 +489,7 @@ async function assignNextPartner(order) {
   const eligible = await Staff.find({
     role:        'delivery_partner',
     isActive:    true,
+    isOnline:    true,
     isAvailable: true,
     _id:         { $nin: rejectedIds },
   }).lean();
@@ -669,6 +668,32 @@ app.get('/api/debug/fix-stuck-order', async (req, res) => {
     res.json({ success: false, message: 'Order not found' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// One-time fix: cancel stuck orders + reset all staff availability
+app.get('/api/fix-stuck-orders', async (req, res) => {
+  try {
+    const ordersResult = await Order.updateMany(
+      { status: { $in: ['packing', 'accepted', 'pending'] } },
+      { status: 'cancelled' }
+    )
+    const staffResult = await Staff.updateMany(
+      {},
+      {
+        currentOrderId: null,
+        isAvailable: true,
+        currentlyNotifying: null,
+      }
+    )
+    res.json({
+      success: true,
+      message: 'Fixed!',
+      ordersFixed: ordersResult.modifiedCount,
+      staffFixed: staffResult.modifiedCount,
+    })
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message })
   }
 });
 
@@ -1228,7 +1253,7 @@ app.put('/api/orders/:id/accept-packing', async (req, res) => {
 });
 
 // Picker done packing → status: ready_pickup
-// If a partner already accepted this order, just notify them via order_update.
+// If a partner already has this order, push order_update to their screen.
 // If no partner yet, run round-robin to find and notify the next eligible one.
 app.put('/api/orders/:id/ready-pickup', async (req, res) => {
   try {
@@ -1239,11 +1264,19 @@ app.put('/api/orders/:id/ready-pickup', async (req, res) => {
     );
     if (!order) return res.status(404).json({ success: false, message: 'Not found' });
 
+    console.log(`[READY-PICKUP] orderId=${order._id} deliveryPartnerId=${order.deliveryPartnerId}`);
+
     if (order.deliveryPartnerId) {
-      // Partner already on this order — just push the status change to their screen
-      emitOrderUpdate(order);
+      const room = 'delivery_' + order.deliveryPartnerId.toString();
+      // Emit directly — explicit log so we can confirm delivery in server logs
+      io.to(room).emit('order_update', order);
+      console.log(`[SOCKET] order_update → ${room} (status: ready_pickup)`);
+
+      io.to('customer_' + order.userPhone).emit('order_update', order);
+      io.to('warehouse_admin').emit('order_update', order);
     } else {
-      // No partner yet — reset rejectedBy and find the first eligible one
+      // No partner yet — reset rejectedBy and find the next eligible one
+      console.log(`[READY-PICKUP] No partner assigned yet — running assignNextPartner`);
       order.rejectedBy = [];
       await order.save();
       const partner = await assignNextPartner(order);
@@ -1253,9 +1286,9 @@ app.put('/api/orders/:id/ready-pickup', async (req, res) => {
           message: 'Koi available delivery partner nahi hai!',
         });
       }
+      io.to('warehouse_admin').emit('order_update', order);
     }
 
-    io.to('warehouse_admin').emit('order_update', order);
     res.json({ success: true, order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1510,6 +1543,17 @@ app.put('/api/orders/:id/status', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Temporary cleanup: delete all active (non-delivered) orders, reset all staff
+app.delete('/api/orders/delete-all-packing', async (req, res) => {
+  try {
+    const del = await Order.deleteMany({
+      status: { $in: ['pending', 'accepted', 'packing', 'ready_pickup', 'dispatched'] }
+    });
+    await Staff.updateMany({}, { currentOrderId: null, isAvailable: true });
+    res.json({ success: true, message: 'Cleared', deletedCount: del.deletedCount });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── DELIVERY ──────────────────────────────────────────────────
 app.get('/api/delivery/available-orders', async (req, res) => {
   try {
@@ -1629,6 +1673,7 @@ app.get('/api/staff', async (req, res) => {
     if (req.query.role)        filter.role        = req.query.role;
     if (req.query.isAvailable) filter.isAvailable = req.query.isAvailable === 'true';
     if (req.query.active)      filter.active      = req.query.active      === 'true';
+    if (req.query.isActive)    filter.isActive    = req.query.isActive    === 'true';
     const staff = await Staff.find(filter).sort({ createdAt: -1 }).lean();
     res.json({ success: true, staff });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -1748,12 +1793,18 @@ app.put('/api/staff/:id/online-status', async (req, res) => {
     if (typeof isOnline !== 'boolean') {
       return res.status(400).json({ success: false, message: 'isOnline (boolean) required' });
     }
-    const staff = await Staff.findByIdAndUpdate(
-      req.params.id,
-      { isOnline, ...(isOnline ? {} : { isAvailable: false, available: false }) },
-      { new: true }
-    );
+    // Going offline: keep isAvailable true so they're eligible when they come back online.
+    // isOnline is the gate for new order assignment — not isAvailable.
+    const updateFields = isOnline
+      ? { isOnline: true,  isAvailable: true,  available: true }
+      : { isOnline: false, isAvailable: true,  available: true, currentOrderId: null };
+    const staff = await Staff.findByIdAndUpdate(req.params.id, updateFields, { new: true });
     if (!staff) return res.status(404).json({ success: false, message: 'Staff not found' });
+    io.to('warehouse_admin').emit('partner_status_update', {
+      partnerId: staff._id,
+      name:      staff.name,
+      isOnline:  staff.isOnline,
+    });
     res.json({ success: true, isOnline: staff.isOnline, staff });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1795,6 +1846,36 @@ app.get('/api/staff/:id/earnings', async (req, res) => {
     if (!staff) return res.status(404).json({ success: false, message: 'Not found' });
     const orders = await Order.find({ deliveryPartnerId: req.params.id, status: 'delivered' }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, totalEarnings: staff.totalEarnings, totalOrdersHandled: staff.totalOrdersHandled, orders });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.get('/api/staff/:id/stats', async (req, res) => {
+  try {
+    const orders = await Order.find({
+      deliveryPartnerId: req.params.id,
+      status: 'delivered',
+    }).lean();
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const todayOrders = orders.filter(o => {
+      const d = new Date(o.deliveredAt || o.createdAt);
+      return d >= todayStart && d <= todayEnd;
+    });
+
+    const totalEarnings = orders.reduce((sum, o) => sum + (o.earningAmount || 30), 0);
+    const todayEarnings = todayOrders.reduce((sum, o) => sum + (o.earningAmount || 30), 0);
+
+    res.json({
+      success: true,
+      totalOrders:   orders.length,
+      todayOrders:   todayOrders.length,
+      totalEarnings,
+      todayEarnings,
+    });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.put('/api/staff/:id/add-earning', async (req, res) => {
