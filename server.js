@@ -475,10 +475,11 @@ const deliveryChatMessages   = {};
 
 const emitOrderUpdate = (order) => {
   if (!order) return;
-  io.to('customer_' + order.userPhone).emit('order_update', order);
   io.to('warehouse_admin').emit('order_update', order);
+  if (order.userPhone) io.to('customer_' + order.userPhone).emit('order_update', order);
+  if (order.userEmail) io.to('customer_' + order.userEmail).emit('order_update', order);
   if (order.deliveryPartnerId) {
-    io.to('delivery_' + order.deliveryPartnerId).emit('order_update', order);
+    io.to('delivery_' + order.deliveryPartnerId.toString()).emit('order_update', order);
   }
 };
 
@@ -674,29 +675,42 @@ app.get('/api/debug/fix-stuck-order', async (req, res) => {
   }
 });
 
-// One-time fix: cancel stuck orders + reset all staff availability
+// Safe fix: cancel only orders stuck for 24+ hours, reset only their assigned staff
 app.get('/api/fix-stuck-orders', async (req, res) => {
   try {
-    const ordersResult = await Order.updateMany(
-      { status: { $in: ['packing', 'accepted', 'pending'] } },
-      { status: 'cancelled' }
-    )
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    // Find stuck orders before updating so we can emit + reset matching staff
+    const stuckOrders = await Order.find({
+      status:    { $in: ['packing', 'accepted', 'pending'] },
+      createdAt: { $lt: twentyFourHoursAgo },
+    }).lean();
+
+    if (stuckOrders.length === 0) {
+      return res.json({ success: true, ordersFixed: 0, staffFixed: 0 });
+    }
+
+    const stuckIds = stuckOrders.map(o => o._id);
+
+    await Order.updateMany({ _id: { $in: stuckIds } }, { status: 'cancelled' });
+
+    // Emit socket update for each cancelled order
+    stuckOrders.forEach(o => emitOrderUpdate({ ...o, status: 'cancelled' }));
+
+    // Reset only staff whose currentOrderId was one of the cancelled orders
+    const stuckIdStrings = stuckIds.map(id => id.toString());
     const staffResult = await Staff.updateMany(
-      {},
-      {
-        currentOrderId: null,
-        isAvailable: true,
-        currentlyNotifying: null,
-      }
-    )
+      { currentOrderId: { $in: stuckIdStrings } },
+      { currentOrderId: null, isAvailable: true }
+    );
+
     res.json({
-      success: true,
-      message: 'Fixed!',
-      ordersFixed: ordersResult.modifiedCount,
-      staffFixed: staffResult.modifiedCount,
-    })
+      success:    true,
+      ordersFixed: stuckOrders.length,
+      staffFixed:  staffResult.modifiedCount,
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message })
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
