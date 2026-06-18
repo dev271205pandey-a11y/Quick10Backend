@@ -1959,13 +1959,18 @@ app.post('/api/upload', async (req, res) => {
     } else if (type === 'icon') {
       uploadOptions.width = 200
       uploadOptions.quality = 'auto:eco'
+    } else if (type === 'broadcast') {
+      uploadOptions.quality = 'auto:best'
+      uploadOptions.fetch_format = 'auto'
     } else {
       uploadOptions.width = 800
       uploadOptions.quality = 'auto:good'
     }
 
     const result = await cloudinary.uploader.upload(image, uploadOptions)
-    const imageUrl = result.secure_url.replace('/upload/', '/upload/w_400,q_70,f_auto/')
+    const imageUrl = type === 'broadcast'
+      ? result.secure_url
+      : result.secure_url.replace('/upload/', '/upload/w_400,q_70,f_auto/')
     res.json({ success: true, url: imageUrl })
   } catch (err) {
     res.status(500).json({ success: false, message: err.message })
