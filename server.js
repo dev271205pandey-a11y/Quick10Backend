@@ -417,9 +417,12 @@ const DeliveryTimesSchema = new mongoose.Schema({
 const DeliveryTimes = mongoose.model('DeliveryTimes', DeliveryTimesSchema);
 
 const BroadcastSchema = new mongoose.Schema({
-  message:  { type: String, required: true },
-  imageUrl: { type: String, default: '' },
-  readBy:   { type: [String], default: [] },
+  message:   { type: String, required: true },
+  imageUrl:  { type: String, default: '' },
+  readBy:    { type: [String], default: [] },
+  linkType:  { type: String, default: '' },
+  linkValue: { type: String, default: '' },
+  linkName:  { type: String, default: '' },
 }, { timestamps: true });
 const Broadcast = mongoose.model('Broadcast', BroadcastSchema);
 
@@ -2412,7 +2415,7 @@ app.get('/api/auth/create-test-user', async (req, res) => {
 })
 
 // ── Push notification helper ──────────────────────────────────
-const sendPushNotification = async (tokens, title, body, data = {}) => {
+const sendPushNotification = async (tokens, title, body, data = {}, imageUrl = '') => {
   if (!tokens || tokens.length === 0) return;
   const messages = tokens.map(token => ({
     to:        token,
@@ -2422,6 +2425,7 @@ const sendPushNotification = async (tokens, title, body, data = {}) => {
     data:      data,
     priority:  'high',
     channelId: 'default',
+    ...(imageUrl ? { image: imageUrl } : {}),
   }));
   try {
     const response = await fetch('https://exp.host/--/api/v2/push/send', {
@@ -2458,7 +2462,7 @@ app.get('/api/broadcasts', async (req, res) => {
   try {
     const messages = await Broadcast.find({})
       .sort({ createdAt: -1 }).lean()
-    res.json({ success: true, messages })
+    res.json({ success: true, messages, broadcasts: messages })
   } catch(err) {
     res.status(500).json({ success: false, message: err.message })
   }
@@ -2466,13 +2470,16 @@ app.get('/api/broadcasts', async (req, res) => {
 
 app.post('/api/broadcasts', async (req, res) => {
   try {
-    const { message, imageUrl } = req.body
+    const { message, imageUrl, linkType, linkValue, linkName } = req.body
     if (!message) return res.status(400).json({
       success: false, message: 'Message required'
     })
     const broadcast = new Broadcast({
       message: message,
-      imageUrl: imageUrl || ''
+      imageUrl: imageUrl || '',
+      linkType: linkType || '',
+      linkValue: linkValue || '',
+      linkName: linkName || '',
     })
     await broadcast.save()
 
@@ -2486,7 +2493,8 @@ app.post('/api/broadcasts', async (req, res) => {
       tokens,
       'Quick10 🛒',
       message.substring(0, 100),
-      { type: 'broadcast', broadcastId: String(broadcast._id) }
+      { type: 'broadcast', broadcastId: String(broadcast._id) },
+      imageUrl || ''
     )
 
     res.json({ success: true, broadcast })
