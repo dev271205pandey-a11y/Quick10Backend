@@ -542,6 +542,11 @@ io.on('connection', (socket) => {
     console.log(socket.id, 'joined', room);
   });
 
+  socket.on('join', (room) => {
+    socket.join(room);
+    console.log(socket.id, 'joined room:', room);
+  });
+
   socket.on('register', (phone) => {
     connectedUsers[phone] = socket.id;
     socket.join('customer_' + phone);
