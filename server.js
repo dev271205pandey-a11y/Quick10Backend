@@ -273,6 +273,8 @@ const AppSettingsSchema = new mongoose.Schema({
   commission:        { type: Number,  default: 20 },
   basePay:           { type: Number,  default: 200 },
   warehouseName:     { type: String,  default: 'Quick10 WH-1' },
+  warehouseLat:      { type: Number,  default: null },
+  warehouseLng:      { type: Number,  default: null },
   warehouseAddress:  { type: String,  default: '' },
   warehouseCity:     { type: String,  default: '' },
   maxDeliveryRadius: { type: Number,  default: 10 },
