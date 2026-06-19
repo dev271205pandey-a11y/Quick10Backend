@@ -309,6 +309,10 @@ const SectionSchema = new mongoose.Schema({
   sectionId:  String,
   title:      String,
   titleColor: { type: String, default: '#111111' },
+  bgColor:    { type: String, default: '' },
+  iconUrl:    { type: String, default: '' },
+  fontStyle:  { type: String, default: 'default' },
+  order:      { type: Number, default: 0 },
   categoryId: String,
   imageUrl:   String,
   position:   { type: Number, default: 0 },
@@ -713,6 +717,35 @@ app.get('/api/fix-stuck-orders', async (req, res) => {
       success:    true,
       ordersFixed: stuckOrders.length,
       staffFixed:  staffResult.modifiedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── ONE-TIME CLEANUP: clear invalid sectionNames ──────────────
+app.get('/api/fix-section-duplicates', async (req, res) => {
+  try {
+    const dbSections = await Section.find({});
+    const validSectionNames = new Set(dbSections.map(s => s.name).filter(Boolean));
+
+    const products = await Product.find({
+      sectionName: { $exists: true, $ne: 'General', $ne: '' },
+    });
+
+    let fixedCount = 0;
+    for (const p of products) {
+      if (p.sectionName && !validSectionNames.has(p.sectionName)) {
+        await Product.findByIdAndUpdate(p._id, { sectionName: 'General' });
+        fixedCount++;
+      }
+    }
+
+    res.json({
+      success: true,
+      fixedCount,
+      validSections: [...validSectionNames],
+      message: `${fixedCount} products ka invalid sectionName 'General' kar diya`,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -1976,8 +2009,10 @@ app.post('/api/upload', async (req, res) => {
       uploadOptions.width = 400
       uploadOptions.quality = 'auto:eco'
     } else if (type === 'icon') {
-      uploadOptions.width = 200
-      uploadOptions.quality = 'auto:eco'
+      uploadOptions.width  = 300
+      uploadOptions.height = 300
+      uploadOptions.quality = 'auto:best'
+      uploadOptions.crop = 'fit'
     } else if (type === 'broadcast') {
       uploadOptions.quality = 'auto:best'
       uploadOptions.fetch_format = 'auto'
@@ -1987,7 +2022,7 @@ app.post('/api/upload', async (req, res) => {
     }
 
     const result = await cloudinary.uploader.upload(image, uploadOptions)
-    const imageUrl = type === 'broadcast'
+    const imageUrl = (type === 'broadcast' || type === 'icon')
       ? result.secure_url
       : result.secure_url.replace('/upload/', '/upload/w_400,q_70,f_auto/')
     res.json({ success: true, url: imageUrl })
