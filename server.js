@@ -2620,6 +2620,64 @@ app.get('/api/ratings/:productId/:userEmail', async (req, res) => {
   }
 })
 
+// ── DAMAGE REPORT SCHEMA ──────────────────────────────────────
+const DamageReportSchema = new mongoose.Schema({
+  productId:    String,
+  productName:  { type: String, required: true },
+  productImage: String,
+  skuId:        String,
+  quantity:     { type: Number, default: 0 },
+  pricePerUnit: { type: Number, default: 0 },
+  reason:       { type: String, enum: ['Expired', 'Broken Packaging', 'Spilled', 'Damaged', 'Theft', 'Other'], default: 'Other' },
+  reporter:     String,
+  notes:        String,
+  status:       { type: String, enum: ['pending', 'resolved'], default: 'pending' },
+}, { timestamps: true, strict: false });
+
+const DamageReport = mongoose.model('DamageReport', DamageReportSchema);
+
+// GET all damage reports (most recent first)
+app.get('/api/damage-reports', async (req, res) => {
+  try {
+    const limit   = parseInt(req.query.limit)  || 100;
+    const reports = await DamageReport.find({}).sort({ createdAt: -1 }).limit(limit);
+    res.json({ success: true, reports });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST new damage report
+app.post('/api/damage-reports', async (req, res) => {
+  try {
+    const report = new DamageReport(req.body);
+    await report.save();
+    res.json({ success: true, report });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PATCH resolve a damage report
+app.patch('/api/damage-reports/:id/resolve', async (req, res) => {
+  try {
+    const report = await DamageReport.findByIdAndUpdate(req.params.id, { status: 'resolved' }, { new: true });
+    res.json({ success: true, report });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE a damage report
+app.delete('/api/damage-reports/:id', async (req, res) => {
+  try {
+    await DamageReport.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ── SERVER START ──────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
