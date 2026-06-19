@@ -2620,6 +2620,147 @@ app.get('/api/ratings/:productId/:userEmail', async (req, res) => {
   }
 })
 
+// ── LOCATION CAPTURE PAGE (opens on phone, captures real GPS) ──
+app.get('/set-location', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Quick10 - Set Warehouse Location</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F4F6F8;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px}
+.logo{width:48px;height:48px;background:#00A550;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900;color:#fff;margin-bottom:8px}
+h1{font-size:22px;font-weight:900;color:#111827;margin-bottom:4px;text-align:center}
+.sub{font-size:14px;color:#6B7280;text-align:center;margin-bottom:28px;line-height:1.5}
+.card{background:#fff;border-radius:18px;border:1px solid #E5E7EB;padding:22px;width:100%;max-width:420px;box-shadow:0 4px 16px rgba(0,0,0,.06);margin-bottom:14px}
+.card-title{font-size:11px;font-weight:800;color:#6B7280;text-transform:uppercase;letter-spacing:.6px;margin-bottom:16px}
+.coord-row{display:flex;gap:12px;margin-bottom:12px}
+.coord-box{flex:1;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:10px;padding:12px;text-align:center}
+.coord-lbl{font-size:9px;font-weight:800;color:#9CA3AF;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.coord-val{font-size:17px;font-weight:800;color:#111827;font-variant-numeric:tabular-nums}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:15px;border-radius:12px;border:none;font-size:16px;font-weight:800;cursor:pointer;transition:opacity .15s}
+.btn-green{background:#00A550;color:#fff}
+.btn-green:disabled{opacity:.5;cursor:not-allowed}
+.btn-outline{background:#F0FDF4;color:#00A550;border:2px solid #A7F3D0;margin-top:10px}
+.status{text-align:center;padding:12px 16px;border-radius:10px;font-size:14px;font-weight:700;margin-top:6px;display:none}
+.status.success{background:#F0FDF4;color:#065F46;display:block}
+.status.error{background:#FEF2F2;color:#991B1B;display:block}
+.status.info{background:#EFF6FF;color:#1E40AF;display:block}
+.step{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px}
+.step-num{width:28px;height:28px;background:#00A550;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#fff;flex-shrink:0}
+.step-txt{font-size:13px;color:#374151;line-height:1.5;padding-top:4px}
+.hidden{display:none}
+input[type=text]{width:100%;padding:12px 14px;border:1.5px solid #E5E7EB;border-radius:10px;font-size:14px;color:#111827;background:#F9FAFB;margin-bottom:12px;outline:none}
+input[type=text]:focus{border-color:#00A550}
+</style>
+</head>
+<body>
+<div class="logo">Q</div>
+<h1>Set Warehouse Location</h1>
+<p class="sub">Warehouse par pahunchne ke baad<br/>apni real GPS location capture karo</p>
+
+<div class="card">
+  <div class="card-title">Steps</div>
+  <div class="step"><div class="step-num">1</div><div class="step-txt">Warehouse location par physically pahuncho</div></div>
+  <div class="step"><div class="step-num">2</div><div class="step-txt">Niche "Capture My Location" button dabaao</div></div>
+  <div class="step"><div class="step-num">3</div><div class="step-txt">Location allow karo (browser permission)</div></div>
+  <div class="step"><div class="step-num">4</div><div class="step-txt">"Save" button dabaao — location save ho jaayegi</div></div>
+</div>
+
+<div class="card">
+  <div class="card-title">Warehouse Name (optional)</div>
+  <input type="text" id="whName" placeholder="e.g. Balrampur Main Warehouse"/>
+
+  <button class="btn btn-green" id="captureBtn" onclick="captureLocation()">
+    Capture My Location
+  </button>
+  <div class="status info" id="gpsStatus">GPS locate kar raha hai...</div>
+
+  <div id="coordDisplay" class="hidden" style="margin-top:16px">
+    <div class="card-title" style="margin-bottom:10px">Captured Location</div>
+    <div class="coord-row">
+      <div class="coord-box"><div class="coord-lbl">Latitude</div><div class="coord-val" id="latVal">—</div></div>
+      <div class="coord-box"><div class="coord-lbl">Longitude</div><div class="coord-val" id="lngVal">—</div></div>
+    </div>
+    <button class="btn btn-green" id="saveBtn" onclick="saveLocation()">Save as Warehouse Location</button>
+    <button class="btn btn-outline" onclick="captureLocation()">Re-capture Location</button>
+  </div>
+
+  <div class="status" id="saveStatus"></div>
+</div>
+
+<script>
+var capturedLat = null, capturedLng = null;
+
+function captureLocation() {
+  if (!navigator.geolocation) {
+    showStatus('gpsStatus','error','GPS is browser mein support nahi karta. Please Chrome/Safari use karo.');
+    return;
+  }
+  document.getElementById('captureBtn').disabled = true;
+  document.getElementById('gpsStatus').className = 'status info';
+  document.getElementById('gpsStatus').style.display = 'block';
+  document.getElementById('gpsStatus').textContent = 'GPS locate kar raha hai... thoda wait karo';
+  navigator.geolocation.getCurrentPosition(
+    function(pos) {
+      capturedLat = pos.coords.latitude;
+      capturedLng = pos.coords.longitude;
+      document.getElementById('latVal').textContent = capturedLat.toFixed(6);
+      document.getElementById('lngVal').textContent = capturedLng.toFixed(6);
+      document.getElementById('coordDisplay').classList.remove('hidden');
+      document.getElementById('gpsStatus').style.display = 'none';
+      document.getElementById('captureBtn').disabled = false;
+    },
+    function(err) {
+      var msg = err.code === 1 ? 'Location access allow nahi kiya. Browser settings mein permission do.'
+              : err.code === 2 ? 'GPS signal nahi mila. Bahar jaake try karo ya WiFi on karo.'
+              : 'Location timeout. Dobara try karo.';
+      document.getElementById('gpsStatus').className = 'status error';
+      document.getElementById('gpsStatus').textContent = msg;
+      document.getElementById('captureBtn').disabled = false;
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+}
+
+function saveLocation() {
+  if (capturedLat === null) { alert('Pehle location capture karo.'); return; }
+  var saveBtn = document.getElementById('saveBtn');
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving...';
+  var name = document.getElementById('whName').value.trim() || 'Main Warehouse';
+  fetch('/api/app-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ warehouseLat: capturedLat, warehouseLng: capturedLng, warehouseName: name })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if (d.success || d.settings) {
+      var st = document.getElementById('saveStatus');
+      st.className = 'status success';
+      st.textContent = 'Location save ho gayi! Admin dashboard par update ho gayi.';
+      saveBtn.textContent = 'Saved!';
+    } else {
+      throw new Error(d.message || 'Save failed');
+    }
+  })
+  .catch(function(e){
+    var st = document.getElementById('saveStatus');
+    st.className = 'status error';
+    st.textContent = 'Error: ' + e.message;
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save as Warehouse Location';
+  });
+}
+</script>
+</body>
+</html>`);
+});
+
 // ── DAMAGE REPORT SCHEMA ──────────────────────────────────────
 const DamageReportSchema = new mongoose.Schema({
   productId:    String,
