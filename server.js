@@ -1246,7 +1246,21 @@ app.get('/api/orders', async (req, res) => {
     if (req.query.deliveryPartnerId) filter.deliveryPartnerId = req.query.deliveryPartnerId;
     if (req.query.userPhone)         filter.userPhone         = req.query.userPhone;
     const orders = await Order.find(filter).sort({ createdAt: -1 }).lean();
-    res.json({ success: true, orders });
+
+    // Enrich orders with customer name from User collection (by phone)
+    const phones  = [...new Set(orders.map(o => o.userPhone).filter(Boolean))];
+    const users   = phones.length
+      ? await User.find({ phone: { $in: phones } }, 'name phone').lean()
+      : [];
+    const userMap = {};
+    users.forEach(u => { if (u.phone) userMap[u.phone] = u.name || ''; });
+
+    const enriched = orders.map(o => ({
+      ...o,
+      customerName: userMap[o.userPhone] || '',
+    }));
+
+    res.json({ success: true, orders: enriched });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.post('/api/orders', async (req, res) => {
