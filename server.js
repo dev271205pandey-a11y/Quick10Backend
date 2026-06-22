@@ -2566,8 +2566,8 @@ app.post('/api/broadcasts', async (req, res) => {
     const tokens = users.map(u => u.pushToken).filter(Boolean)
     await sendPushNotification(
       tokens,
-      message.substring(0, 100),
       'Quick10',
+      message,
       { type: 'broadcast', broadcastId: String(broadcast._id) },
       imageUrl || ''
     )
