@@ -479,6 +479,19 @@ const onlineDeliveryPartners = {};
 const chatMessages           = {};
 const deliveryChatMessages   = {};
 
+// ── Auto-delete chats older than 24 hours (runs every hour) ──
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  let deleted = 0;
+  for (const phone of Object.keys(chatMessages)) {
+    const msgs = chatMessages[phone]?.messages;
+    if (!msgs || msgs.length === 0) { delete chatMessages[phone]; deleted++; continue; }
+    chatMessages[phone].messages = msgs.filter(m => new Date(m.time).getTime() > cutoff);
+    if (chatMessages[phone].messages.length === 0) { delete chatMessages[phone]; deleted++; }
+  }
+  if (deleted > 0) console.log(`[Chat Cleanup] ${deleted} old chats deleted. Active: ${Object.keys(chatMessages).length}`);
+}, 60 * 60 * 1000);
+
 const emitOrderUpdate = (order) => {
   if (!order) return;
   io.to('warehouse_admin').emit('order_update', order);
@@ -567,6 +580,14 @@ io.on('connection', (socket) => {
     socket.emit('all_delivery_chats', deliveryChatMessages);
   });
 
+  // Alias for warehouse admin panel
+  socket.on('admin_join', () => {
+    connectedUsers['admin'] = socket.id;
+    socket.join('warehouse_admin');
+    socket.emit('admin_authenticated', { success: true });
+    socket.emit('all_chats', chatMessages);
+  });
+
   socket.on('customer_message', (data) => {
     const { phone, message, name } = data;
     if (!chatMessages[phone]) chatMessages[phone] = { phone, name: name || phone, messages: [] };
@@ -646,6 +667,24 @@ io.on('connection', (socket) => {
     Object.keys(connectedUsers).forEach(k => { if (connectedUsers[k] === socket.id) delete connectedUsers[k]; });
     Object.keys(onlineDeliveryPartners).forEach(k => { if (onlineDeliveryPartners[k]?.socketId === socket.id) delete onlineDeliveryPartners[k]; });
   });
+});
+
+// ── ADMIN CHAT REST API ───────────────────────────────────────
+app.get('/api/admin/chats', (req, res) => {
+  const list = Object.values(chatMessages).map(c => ({
+    phone:       c.phone,
+    name:        c.name || c.phone,
+    messages:    c.messages || [],
+    lastMessage: (c.messages || []).slice(-1)[0]?.text || '',
+    lastTime:    (c.messages || []).slice(-1)[0]?.time || '',
+    unread:      0,
+  }));
+  res.json({ success: true, chats: list });
+});
+
+app.delete('/api/admin/chats/:phone', (req, res) => {
+  delete chatMessages[req.params.phone];
+  res.json({ success: true });
 });
 
 // ── DEBUG ─────────────────────────────────────────────────────
@@ -756,6 +795,56 @@ app.get('/api/fix-section-duplicates', async (req, res) => {
 
 // ── HEALTH ────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'OK', message: 'Backend is running!' }));
+
+// ── NOTIFICATION SOUND (WAV generated in Node.js) ─────────────
+app.get('/api/notification-sound', (req, res) => {
+  const sampleRate  = 22050;
+  const tones = [
+    { freq: 880,  from: 0.00, to: 0.20 },
+    { freq: 1100, from: 0.25, to: 0.45 },
+    { freq: 1320, from: 0.50, to: 0.78 },
+  ];
+  const totalSamples = Math.floor(sampleRate * 0.85);
+  const dataBytes    = totalSamples * 2; // 16-bit PCM
+  const buf          = Buffer.alloc(44 + dataBytes);
+
+  // WAV header
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + dataBytes, 4);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);           // PCM
+  buf.writeUInt16LE(1, 22);           // mono
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * 2, 28); // byte rate
+  buf.writeUInt16LE(2, 32);           // block align
+  buf.writeUInt16LE(16, 34);          // 16-bit
+  buf.write('data', 36);
+  buf.writeUInt32LE(dataBytes, 40);
+
+  for (let i = 0; i < totalSamples; i++) {
+    const t = i / sampleRate;
+    let sample = 0;
+    for (const tone of tones) {
+      if (t >= tone.from && t < tone.to) {
+        const dur = tone.to - tone.from;
+        const lt  = t - tone.from;
+        const env = Math.min(lt / 0.015, 1) * Math.min((dur - lt) / 0.015, 1);
+        sample += env * 0.7 * Math.sin(2 * Math.PI * tone.freq * lt);
+      }
+    }
+    const pcm = Math.max(-32768, Math.min(32767, Math.round(sample * 28000)));
+    buf.writeInt16LE(pcm, 44 + i * 2);
+  }
+
+  res.set({
+    'Content-Type':  'audio/wav',
+    'Cache-Control': 'public, max-age=86400',
+    'Content-Length': buf.length,
+  });
+  res.send(buf);
+});
 
 app.get('/api/admin/phone', async (req, res) => {
   try {
@@ -1706,6 +1795,17 @@ app.put('/api/users/:phone', async (req, res) => {
       if (!user.addresses) user.addresses = [];
       if (!user.addresses.find(a => a.id === address.id)) user.addresses.push(address);
     }
+    await user.save();
+    res.json({ success: true, user });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.post('/api/users/:phone/addresses', async (req, res) => {
+  try {
+    let user = await User.findOne({ phone: req.params.phone });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user.addresses) user.addresses = [];
+    const newAddr = { ...req.body, id: Date.now().toString() };
+    user.addresses.push(newAddr);
     await user.save();
     res.json({ success: true, user });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
