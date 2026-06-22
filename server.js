@@ -1803,11 +1803,13 @@ app.post('/api/users/:phone/addresses', async (req, res) => {
   try {
     let user = await User.findOne({ phone: req.params.phone });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (!user.addresses) user.addresses = [];
     const newAddr = { ...req.body, id: Date.now().toString() };
-    user.addresses.push(newAddr);
-    await user.save();
-    res.json({ success: true, user });
+    const updated = await User.findOneAndUpdate(
+      { phone: req.params.phone },
+      { $push: { addresses: newAddr } },
+      { new: true }
+    );
+    res.json({ success: true, user: updated });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.delete('/api/users/:phone/addresses/:addressId', async (req, res) => {
