@@ -2564,10 +2564,13 @@ app.post('/api/broadcasts', async (req, res) => {
     // Send push notification to all users with a token
     const users  = await User.find({ pushToken: { $ne: '' } }).lean()
     const tokens = users.map(u => u.pushToken).filter(Boolean)
+    const lines = message.split('\n').filter(l => l.trim());
+    const notifTitle = lines[0] || 'Quick10';
+    const notifBody  = lines.length > 1 ? lines.slice(1).join('\n') : 'Quick10';
     await sendPushNotification(
       tokens,
-      'Quick10',
-      message,
+      notifTitle,
+      notifBody,
       { type: 'broadcast', broadcastId: String(broadcast._id) },
       imageUrl || ''
     )
