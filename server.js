@@ -2489,6 +2489,14 @@ app.get('/api/auth/create-test-user', async (req, res) => {
   }
 })
 
+// ── Unicode bold converter (A-Z, a-z, 0-9 only; other chars unchanged) ──
+const toBoldUnicode = (text) => text.replace(/[A-Za-z0-9]/g, (c) => {
+  const code = c.charCodeAt(0);
+  if (c >= 'A' && c <= 'Z') return String.fromCodePoint(0x1D5D4 + (code - 65));
+  if (c >= 'a' && c <= 'z') return String.fromCodePoint(0x1D5EE + (code - 97));
+  return String.fromCodePoint(0x1D7EC + (code - 48));
+});
+
 // ── Push notification helper ──────────────────────────────────
 const sendPushNotification = async (tokens, title, body, data = {}, imageUrl = '') => {
   if (!tokens || tokens.length === 0) return;
@@ -2566,8 +2574,8 @@ app.post('/api/broadcasts', async (req, res) => {
     const tokens = users.map(u => u.pushToken).filter(Boolean)
     await sendPushNotification(
       tokens,
-      message,
       'Quick10',
+      toBoldUnicode(message),
       { type: 'broadcast', broadcastId: String(broadcast._id) },
       imageUrl || ''
     )
