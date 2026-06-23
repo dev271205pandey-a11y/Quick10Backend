@@ -2223,6 +2223,8 @@ app.put('/api/app-settings', async (req, res) => {
     } else {
       settings = await AppSettings.findByIdAndUpdate(settings._id, { $set: req.body }, { new: true, strict: false });
     }
+    // Push to all connected customers instantly
+    io.emit('settings_updated', settings);
     res.json({ success: true, settings });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
