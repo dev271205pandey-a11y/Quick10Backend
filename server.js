@@ -1632,6 +1632,27 @@ app.put('/api/orders/:id/location', async (req, res) => {
 });
 
 // Backfill geocoded customerLocation for existing orders that have missing/default coords
+app.put('/api/orders/:id/cancel', async (req, res) => {
+  try {
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { status: 'cancelled', cancelledAt: new Date(), cancelledBy: req.body.cancelledBy || 'customer' },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+    emitOrderUpdate(order);
+    // Free up delivery partner if assigned
+    const pid = order.deliveryPartnerId;
+    if (pid) {
+      await Staff.findByIdAndUpdate(pid, {
+        isAvailable: true, available: true, currentOrderId: null,
+      });
+      if (onlineDeliveryPartners[pid]) onlineDeliveryPartners[pid].busy = false;
+    }
+    res.json({ success: true, order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 app.put('/api/orders/:id/geocode-address', async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
