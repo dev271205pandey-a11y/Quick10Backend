@@ -443,28 +443,33 @@ const RatingSchema = new mongoose.Schema({
 const Rating = mongoose.model('Rating', RatingSchema);
 
 // ── GEOCODING ─────────────────────────────────────────────────
-async function geocodeAddress(addressText) {
-  if (!addressText || !addressText.trim()) return null;
-  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
-    + encodeURIComponent(addressText.trim());
-  return new Promise((resolve) => {
-    const req = https.get(url, { headers: { 'User-Agent': 'Quick10App' } }, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
-        try {
-          const results = JSON.parse(data);
-          if (Array.isArray(results) && results.length > 0) {
-            resolve({ lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) });
-          } else {
-            resolve(null);
-          }
-        } catch { resolve(null); }
+async function geocodeAddress(addressObj) {
+  try {
+    const text = typeof addressObj === 'string'
+      ? addressObj
+      : addressObj?.fullAddress ||
+        [addressObj?.area, addressObj?.city, addressObj?.state, addressObj?.pincode]
+          .filter(Boolean).join(', ');
+    if (!text || !text.trim()) return null;
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+      + encodeURIComponent(text.trim());
+    return new Promise((resolve) => {
+      const req = https.get(url, { headers: { 'User-Agent': 'Quick10App/1.0' } }, (res) => {
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const results = JSON.parse(data);
+            if (Array.isArray(results) && results.length > 0) {
+              resolve({ lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) });
+            } else { resolve(null); }
+          } catch { resolve(null); }
+        });
       });
+      req.on('error', () => resolve(null));
+      req.setTimeout(6000, () => { req.destroy(); resolve(null); });
     });
-    req.on('error', () => resolve(null));
-    req.setTimeout(6000, () => { req.destroy(); resolve(null); });
-  });
+  } catch (e) { console.log('Geocode error:', e); return null; }
 }
 
 // ── OTP STORE ─────────────────────────────────────────────────
@@ -1356,27 +1361,21 @@ app.get('/api/orders', async (req, res) => {
 });
 app.post('/api/orders', async (req, res) => {
   try {
-    const body = { ...req.body, orderId: 'ORD' + Date.now() };
-
-    // Auto-geocode customer address when customerLocation not sent by client
-    const hasCustLoc = req.body.customerLocation?.lat && req.body.customerLocation?.lng;
-    if (!hasCustLoc) {
-      const addr = req.body.address || {};
-      const addrText = typeof addr === 'string'
-        ? addr
-        : addr.fullAddress ||
-          [addr.flat || addr.houseNo, addr.landmark, addr.area, addr.city, addr.pincode]
-            .filter(Boolean).join(', ');
-      if (addrText) {
-        const geo = await geocodeAddress(addrText);
-        if (geo) body.customerLocation = geo;
-      }
-    }
-
-    const order = new Order(body);
+    const order = new Order({ ...req.body, orderId: 'ORD' + Date.now() });
     await order.save();
     io.to('warehouse_admin').emit('new_order', order);
     res.json({ success: true, order });
+
+    // Background geocoding — does not block the response
+    const hasCustLoc = order.customerLocation?.lat && order.customerLocation?.lng;
+    if (!hasCustLoc && order.address) {
+      geocodeAddress(order.address).then(async (coords) => {
+        if (coords) {
+          await Order.findByIdAndUpdate(order._id, { customerLocation: coords });
+          console.log(`[GEOCODE] Order ${order._id}: ${coords.lat}, ${coords.lng}`);
+        }
+      }).catch(() => {});
+    }
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.get('/api/orders/user/:phone', async (req, res) => {
@@ -1672,6 +1671,35 @@ app.put('/api/orders/:id/geocode-address', async (req, res) => {
 
     await Order.findByIdAndUpdate(req.params.id, { customerLocation: geo });
     res.json({ success: true, customerLocation: geo, address: addrText });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Backfill geocoded customerLocation for old orders that have missing/default coords
+app.get('/api/geocode-all-orders', async (req, res) => {
+  try {
+    const WAREHOUSE_LAT = 27.4244;
+    const WAREHOUSE_LNG = 82.1833;
+    const orders = await Order.find({
+      $or: [
+        { customerLocation: null },
+        { customerLocation: { $exists: false } },
+        { 'customerLocation.lat': { $exists: false } },
+        { 'customerLocation.lat': WAREHOUSE_LAT },
+      ],
+    }).limit(50);
+
+    let fixed = 0;
+    for (const order of orders) {
+      const coords = await geocodeAddress(order.address);
+      if (coords) {
+        await Order.findByIdAndUpdate(order._id, { customerLocation: coords });
+        fixed++;
+        console.log(`[GEOCODE-ALL] ${order._id}: ${coords.lat}, ${coords.lng}`);
+      }
+      // Rate limit Nominatim — 1 req/sec
+      await new Promise(r => setTimeout(r, 1100));
+    }
+    res.json({ success: true, fixed, checked: orders.length });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
