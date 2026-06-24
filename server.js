@@ -254,10 +254,12 @@ const BannerSchema = new mongoose.Schema({
   linkType:       { type: String, default: 'none', enum: ['category', 'product', 'none'] },
   linkId:         { type: String, default: '' },
   linkName:       { type: String, default: '' },
-  orderNum:       { type: Number, default: 0 },
-  order:          { type: Number, default: 0 },
-  active:         { type: Boolean, default: true },
-}, { timestamps: true });
+  orderNum:                 { type: Number, default: 0 },
+  order:                    { type: Number, default: 0 },
+  active:                   { type: Boolean, default: true },
+  targetMotherCategoryId:   { type: String, default: '' },
+  targetMotherCategoryName: { type: String, default: '' },
+}, { timestamps: true, strict: false });
 
 const AppSettingsSchema = new mongoose.Schema({
   settingsId:        { type: String, default: 'main' },
@@ -2354,19 +2356,29 @@ app.get('/api/banners', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.post('/api/banners', async (req, res) => {
-  try { const b = new Banner(req.body); await b.save(); res.json({ success: true, banner: b }); }
-  catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  try {
+    const b = new Banner(req.body); await b.save();
+    const all = await Banner.find({ active: true }).sort({ orderNum: 1, order: 1 }).lean();
+    io.emit('banners_updated', all);
+    res.json({ success: true, banner: b });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.put('/api/banners/:id', async (req, res) => {
   try {
     const b = await Banner.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!b) return res.status(404).json({ success: false, message: 'Not found' });
+    const all = await Banner.find({ active: true }).sort({ orderNum: 1, order: 1 }).lean();
+    io.emit('banners_updated', all);
     res.json({ success: true, banner: b });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.delete('/api/banners/:id', async (req, res) => {
-  try { await Banner.findByIdAndDelete(req.params.id); res.json({ success: true, message: 'Deleted' }); }
-  catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  try {
+    await Banner.findByIdAndDelete(req.params.id);
+    const all = await Banner.find({ active: true }).sort({ orderNum: 1, order: 1 }).lean();
+    io.emit('banners_updated', all);
+    res.json({ success: true, message: 'Deleted' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ── PROMO SECTION ─────────────────────────────────────────────
