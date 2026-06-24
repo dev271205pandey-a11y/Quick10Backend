@@ -443,33 +443,66 @@ const RatingSchema = new mongoose.Schema({
 const Rating = mongoose.model('Rating', RatingSchema);
 
 // ── GEOCODING ─────────────────────────────────────────────────
+function _nominatimGet(url) {
+  return new Promise((resolve) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'Quick10App/1.0' } }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const results = JSON.parse(data);
+          if (Array.isArray(results) && results.length > 0)
+            resolve({ lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) });
+          else resolve(null);
+        } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(8000, () => { req.destroy(); resolve(null); });
+  });
+}
+
 async function geocodeAddress(addressObj) {
   try {
-    const text = typeof addressObj === 'string'
-      ? addressObj
-      : addressObj?.fullAddress ||
-        [addressObj?.area, addressObj?.city, addressObj?.state, addressObj?.pincode]
-          .filter(Boolean).join(', ');
-    if (!text || !text.trim()) return null;
-    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
-      + encodeURIComponent(text.trim());
-    return new Promise((resolve) => {
-      const req = https.get(url, { headers: { 'User-Agent': 'Quick10App/1.0' } }, (res) => {
-        let data = '';
-        res.on('data', chunk => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const results = JSON.parse(data);
-            if (Array.isArray(results) && results.length > 0) {
-              resolve({ lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) });
-            } else { resolve(null); }
-          } catch { resolve(null); }
-        });
-      });
-      req.on('error', () => resolve(null));
-      req.setTimeout(6000, () => { req.destroy(); resolve(null); });
-    });
-  } catch (e) { console.log('Geocode error:', e); return null; }
+    if (typeof addressObj !== 'string') {
+      const addr = addressObj || {};
+
+      // 1. Structured city+state search (most reliable for India)
+      if (addr.city && addr.state) {
+        const q = encodeURIComponent(`${addr.city}, ${addr.state}, India`);
+        const r = await _nominatimGet(
+          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycode=in&q=${q}`
+        );
+        if (r) return r;
+      }
+
+      // 2. Pincode + city fallback
+      if (addr.pincode && addr.city) {
+        const q = encodeURIComponent(`${addr.pincode}, ${addr.city}, India`);
+        const r = await _nominatimGet(
+          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycode=in&q=${q}`
+        );
+        if (r) return r;
+      }
+
+      // 3. Last resort: fullAddress
+      const fallback = addr.fullAddress ||
+        [addr.area, addr.city, addr.state, addr.pincode].filter(Boolean).join(', ');
+      if (fallback && fallback.trim()) {
+        const q = encodeURIComponent(fallback.trim());
+        return await _nominatimGet(
+          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycode=in&q=${q}`
+        );
+      }
+      return null;
+    }
+
+    // Plain string
+    const q = encodeURIComponent(addressObj.trim());
+    return await _nominatimGet(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycode=in&q=${q}`
+    );
+  } catch (e) { console.log('[GEOCODE] Error:', e.message); return null; }
 }
 
 // ── OTP STORE ─────────────────────────────────────────────────
