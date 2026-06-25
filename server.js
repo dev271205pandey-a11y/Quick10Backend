@@ -462,46 +462,62 @@ function _nominatimGet(url) {
   });
 }
 
+// Balrampur region bounds — any result outside this is rejected as wrong
+const BALRAMPUR_BOUNDS = { minLat: 26.5, maxLat: 28.5, minLng: 81.5, maxLng: 83.5 };
+const VIEWBOX = `${BALRAMPUR_BOUNDS.minLng},${BALRAMPUR_BOUNDS.maxLat},${BALRAMPUR_BOUNDS.maxLng},${BALRAMPUR_BOUNDS.minLat}`;
+
+function _isInBalrampurRegion(lat, lng) {
+  return lat > BALRAMPUR_BOUNDS.minLat && lat < BALRAMPUR_BOUNDS.maxLat
+      && lng > BALRAMPUR_BOUNDS.minLng && lng < BALRAMPUR_BOUNDS.maxLng;
+}
+
 async function geocodeAddress(addressObj) {
   try {
-    if (typeof addressObj !== 'string') {
+    let queries = [];
+
+    if (typeof addressObj === 'string') {
+      let q = addressObj.trim();
+      if (!q.toLowerCase().includes('balrampur')) q += ', Balrampur, Uttar Pradesh';
+      queries.push(q);
+    } else {
       const addr = addressObj || {};
+      // Always append Balrampur context to every search query
+      const suffix = ', Balrampur, Uttar Pradesh, India';
 
-      // 1. Structured city+state search (most reliable for India)
+      // 1. area + city (most specific)
+      if (addr.area && addr.city) {
+        queries.push(`${addr.area}, ${addr.city}${suffix}`);
+      }
+      // 2. city + state
       if (addr.city && addr.state) {
-        const q = encodeURIComponent(`${addr.city}, ${addr.state}, India`);
-        const r = await _nominatimGet(
-          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycode=in&q=${q}`
-        );
-        if (r) return r;
+        queries.push(`${addr.city}, ${addr.state}, India`);
       }
-
-      // 2. Pincode + city fallback
-      if (addr.pincode && addr.city) {
-        const q = encodeURIComponent(`${addr.pincode}, ${addr.city}, India`);
-        const r = await _nominatimGet(
-          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycode=in&q=${q}`
-        );
-        if (r) return r;
+      // 3. pincode
+      if (addr.pincode) {
+        queries.push(`${addr.pincode}, Balrampur, Uttar Pradesh, India`);
       }
-
-      // 3. Last resort: fullAddress
+      // 4. fullAddress fallback
       const fallback = addr.fullAddress ||
-        [addr.area, addr.city, addr.state, addr.pincode].filter(Boolean).join(', ');
-      if (fallback && fallback.trim()) {
-        const q = encodeURIComponent(fallback.trim());
-        return await _nominatimGet(
-          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycode=in&q=${q}`
-        );
-      }
-      return null;
+        [addr.houseNo, addr.area, addr.city, addr.state, addr.pincode].filter(Boolean).join(', ');
+      if (fallback) queries.push(fallback + suffix);
     }
 
-    // Plain string
-    const q = encodeURIComponent(addressObj.trim());
-    return await _nominatimGet(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycode=in&q=${q}`
-    );
+    for (const rawQ of queries) {
+      const q   = encodeURIComponent(rawQ);
+      // bounded=1 + viewbox restricts Nominatim to Balrampur region
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1` +
+                  `&viewbox=${VIEWBOX}&bounded=1&q=${q}`;
+      const r   = await _nominatimGet(url);
+      if (r && _isInBalrampurRegion(r.lat, r.lng)) {
+        console.log(`[GEOCODE] "${rawQ}" → ${r.lat}, ${r.lng}`);
+        return r;
+      }
+      // Small delay between queries to respect Nominatim rate limit
+      await new Promise(res => setTimeout(res, 300));
+    }
+
+    console.log('[GEOCODE] All queries failed for:', typeof addressObj === 'string' ? addressObj : addressObj?.city);
+    return null;
   } catch (e) { console.log('[GEOCODE] Error:', e.message); return null; }
 }
 
@@ -1394,14 +1410,22 @@ app.get('/api/orders', async (req, res) => {
 });
 app.post('/api/orders', async (req, res) => {
   try {
+    const WAREHOUSE_LAT = 27.4244;
+    const WAREHOUSE_LNG = 82.1833;
+
     const order = new Order({ ...req.body, orderId: 'ORD' + Date.now() });
     await order.save();
     io.to('warehouse_admin').emit('new_order', order);
     res.json({ success: true, order });
 
     // Background geocoding — does not block the response
-    const hasCustLoc = order.customerLocation?.lat && order.customerLocation?.lng;
-    if (!hasCustLoc && order.address) {
+    const cLat = order.customerLocation?.lat;
+    const cLng = order.customerLocation?.lng;
+    const isMissing     = !cLat || !cLng;
+    const isSameAsWH    = cLat === WAREHOUSE_LAT && cLng === WAREHOUSE_LNG;
+    const isOutOfRegion = cLat && !_isInBalrampurRegion(cLat, cLng);
+
+    if ((isMissing || isSameAsWH || isOutOfRegion) && order.address) {
       geocodeAddress(order.address).then(async (coords) => {
         if (coords) {
           await Order.findByIdAndUpdate(order._id, { customerLocation: coords });
@@ -1733,6 +1757,38 @@ app.get('/api/geocode-all-orders', async (req, res) => {
       await new Promise(r => setTimeout(r, 1100));
     }
     res.json({ success: true, fixed, checked: orders.length });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Fix active orders with missing/wrong customerLocation
+app.get('/api/geocode-pending-orders', async (req, res) => {
+  try {
+    const WAREHOUSE_LAT = 27.4244;
+    const WAREHOUSE_LNG = 82.1833;
+    const orders = await Order.find({
+      status: { $nin: ['delivered', 'cancelled'] },
+      $or: [
+        { 'customerLocation.lat': { $exists: false } },
+        { 'customerLocation.lat': null },
+        { 'customerLocation.lat': WAREHOUSE_LAT },
+        { 'customerLocation.lng': WAREHOUSE_LNG },
+      ],
+    }).lean();
+
+    console.log(`[GEOCODE-PENDING] ${orders.length} active orders to fix`);
+    let fixed = 0;
+
+    for (const order of orders) {
+      const coords = await geocodeAddress(order.address);
+      if (coords) {
+        await Order.findByIdAndUpdate(order._id, { customerLocation: coords });
+        fixed++;
+        console.log(`[GEOCODE-PENDING] Fixed ${order._id}: ${coords.lat}, ${coords.lng}`);
+      }
+      await new Promise(r => setTimeout(r, 1100)); // Nominatim 1 req/sec rate limit
+    }
+
+    res.json({ success: true, total: orders.length, fixed });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
