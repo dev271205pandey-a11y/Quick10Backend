@@ -259,6 +259,8 @@ const BannerSchema = new mongoose.Schema({
   active:                   { type: Boolean, default: true },
   targetMotherCategoryId:   { type: String, default: '' },
   targetMotherCategoryName: { type: String, default: '' },
+  featuredProducts:         [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+  showFeaturedProducts:     { type: Boolean, default: false },
 }, { timestamps: true, strict: false });
 
 const AppSettingsSchema = new mongoose.Schema({
@@ -2489,7 +2491,10 @@ app.delete('/api/featured-section/:id', async (req, res) => {
 // ── BANNERS ───────────────────────────────────────────────────
 app.get('/api/banners', async (req, res) => {
   try {
-    const banners = await Banner.find({}).sort({ orderNum: 1, order: 1, createdAt: -1 }).lean();
+    const banners = await Banner.find({})
+      .sort({ orderNum: 1, order: 1, createdAt: -1 })
+      .populate('featuredProducts')
+      .lean();
     res.json({ success: true, banners });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -2503,7 +2508,12 @@ app.post('/api/banners', async (req, res) => {
 });
 app.put('/api/banners/:id', async (req, res) => {
   try {
-    const b = await Banner.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { featuredProducts, showFeaturedProducts, ...rest } = req.body;
+    const b = await Banner.findByIdAndUpdate(
+      req.params.id,
+      { ...rest, featuredProducts: featuredProducts || [], showFeaturedProducts: !!showFeaturedProducts },
+      { new: true }
+    );
     if (!b) return res.status(404).json({ success: false, message: 'Not found' });
     const all = await Banner.find({ active: true }).sort({ orderNum: 1, order: 1 }).lean();
     io.emit('banners_updated', all);
