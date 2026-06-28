@@ -2876,6 +2876,9 @@ app.delete('/api/broadcasts/:id', async (req, res) => {
 app.post('/api/ratings', async (req, res) => {
   try {
     const { productId, userEmail, rating, orderId } = req.body
+    if (!productId || !userEmail || !rating) {
+      return res.status(400).json({ success: false, message: 'productId, userEmail, and rating are required' })
+    }
     const existing = await Rating.findOne({ productId, userEmail })
     if (existing) {
       existing.rating = rating
@@ -2886,10 +2889,13 @@ app.post('/api/ratings', async (req, res) => {
     const allRatings = await Rating.find({ productId })
     const avg = allRatings.reduce((sum, r) => sum + r.rating, 0) / allRatings.length
     const avgRating = Math.round(avg * 10) / 10
-    await Product.findByIdAndUpdate(productId, {
-      rating:      avgRating,
-      ratingCount: allRatings.length,
-    })
+    // Update product's avg rating — skip if productId is not a valid ObjectId
+    try {
+      await Product.findByIdAndUpdate(productId, {
+        rating:      avgRating,
+        ratingCount: allRatings.length,
+      })
+    } catch (_) {}
     res.json({ success: true, avgRating, totalRatings: allRatings.length })
   } catch (err) {
     res.status(500).json({ success: false, message: err.message })
@@ -2902,7 +2908,32 @@ app.get('/api/ratings/:productId/:userEmail', async (req, res) => {
       productId: req.params.productId,
       userEmail: req.params.userEmail,
     })
-    res.json({ success: true, rating: found?.rating || 0 })
+    res.json({ success: true, userRating: found?.rating || 0 })
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// ── REVIEWS (warehouse panel) ──────────────────────────────────
+app.get('/api/reviews', async (req, res) => {
+  try {
+    const ratings = await Rating.find().sort({ createdAt: -1 }).limit(200).lean()
+    // Attach product name where possible
+    const productIds = [...new Set(ratings.map(r => r.productId).filter(Boolean))]
+    const products = await Product.find({ _id: { $in: productIds } }, 'name').lean()
+    const prodMap = {}
+    products.forEach(p => { prodMap[String(p._id)] = p.name })
+
+    const reviews = ratings.map(r => ({
+      _id:          r._id,
+      customerName: r.userEmail,
+      rating:       r.rating,
+      comment:      '',
+      createdAt:    r.createdAt,
+      orderId:      r.orderId ? r.orderId.toString().slice(-6).toUpperCase() : '',
+      productName:  prodMap[r.productId] || '',
+    }))
+    res.json({ success: true, reviews })
   } catch (err) {
     res.status(500).json({ success: false, message: err.message })
   }
