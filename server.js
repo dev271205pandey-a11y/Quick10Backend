@@ -999,6 +999,30 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { name, email, newPassword } = req.body;
+    if (!name || !email || !newPassword) {
+      return res.json({ success: false, message: 'Name, email and new password are required' });
+    }
+    if (newPassword.length < 6) {
+      return res.json({ success: false, message: 'Password must be at least 6 characters' });
+    }
+
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    if (!user) return res.json({ success: false, message: 'Email not registered' });
+
+    if ((user.name || '').trim().toLowerCase() !== name.trim().toLowerCase()) {
+      return res.json({ success: false, message: 'Name does not match our records for this email' });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── PRODUCTS ──────────────────────────────────────────────────
 app.get('/api/products', async (req, res) => {
   try {
