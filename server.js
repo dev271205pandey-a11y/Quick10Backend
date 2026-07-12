@@ -8,6 +8,7 @@ const https = require('https');
 const { Server } = require('socket.io');
 const cloudinary = require('cloudinary').v2;
 const bcrypt = require('bcryptjs');
+const { Vibrant } = require('node-vibrant/node');
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dw1fwrcz0',
@@ -397,6 +398,32 @@ const SpecialSectionSchema = new mongoose.Schema({
   active:     { type: Boolean, default: true },
 }, { timestamps: true });
 
+// Standalone dynamic-header-color banner system — deliberately separate from
+// the existing BannerSchema/Banner model above (that one is already live and
+// wired into HomeScreen/BannersScreen; reusing its name would crash mongoose
+// with an OverwriteModelError, and reusing its route would shadow the live one).
+const PromoBannerSchema = new mongoose.Schema({
+  imageUrl:           { type: String, required: true },
+  mediaType:          { type: String, default: 'image', enum: ['image', 'gif', 'video'] },
+  headerColorMode:    { type: String, default: 'auto', enum: ['auto', 'manual'] },
+  manualHeaderColor:  { type: String, default: '' },
+  autoDetectedColor:  { type: String, default: '' },
+  linkType:           { type: String, default: 'none', enum: ['category', 'product', 'collection', 'none'] },
+  targetId:           { type: String, default: '' },
+  displayOrder:       { type: Number, default: 0 },
+  isActive:           { type: Boolean, default: true },
+}, { timestamps: true, strict: false });
+
+const FeaturedCollectionSchema = new mongoose.Schema({
+  title:        { type: String, required: true },
+  coverImage:   { type: String, required: true },
+  mediaType:    { type: String, default: 'image', enum: ['image', 'gif', 'video'] },
+  badgeText:    { type: String, default: '' },
+  productIds:   { type: [String], default: [] },
+  displayOrder: { type: Number, default: 0 },
+  isActive:     { type: Boolean, default: true },
+}, { timestamps: true, strict: false });
+
 // ── MODELS ───────────────────────────────────────────────────
 const SubCategory     = mongoose.model('SubCategory',     SubCategorySchema);
 const Product         = mongoose.model('Product',         ProductSchema);
@@ -419,6 +446,8 @@ const Attendance      = mongoose.model('Attendance',      AttendanceSchema);
 const PromoSection    = mongoose.model('PromoSection',    PromoSectionSchema);
 const PremiumCategory  = mongoose.model('PremiumCategory',  PremiumCategorySchema);
 const SpecialSection   = mongoose.model('SpecialSection',   SpecialSectionSchema);
+const PromoBanner         = mongoose.model('PromoBanner',         PromoBannerSchema);
+const FeaturedCollection  = mongoose.model('FeaturedCollection',  FeaturedCollectionSchema);
 
 const DeliveryTimesSchema = new mongoose.Schema({
   times:     { type: [String], default: ['20', '25', '30', '22', '28', '35'] },
@@ -2315,6 +2344,21 @@ app.post('/api/upload', async (req, res) => {
   }
 });
 
+// Dominant color extraction for auto-mode PromoBanner header colors.
+// Falls back to white and logs the error instead of failing the caller's request.
+async function detectDominantColor(imageUrl) {
+  try {
+    const palette = await Vibrant.from(imageUrl).getPalette();
+    const swatch = palette.Vibrant || palette.Muted || palette.DarkVibrant
+      || palette.LightVibrant || palette.DarkMuted || palette.LightMuted
+      || Object.values(palette).find(Boolean);
+    return (swatch && swatch.hex) || '#FFFFFF';
+  } catch (err) {
+    console.error('detectDominantColor failed for', imageUrl, err.message);
+    return '#FFFFFF';
+  }
+}
+
 // ── RAZORPAY ──────────────────────────────────────────────────
 const Razorpay = require('razorpay');
 const razorpay = new Razorpay({ key_id: 'rzp_test_Su4auXVDl2cV9I', key_secret: 'T7KETzJA2yyfkgwONRd4C0sS' });
@@ -2593,6 +2637,95 @@ app.put('/api/premium-categories/:id', async (req, res) => {
 app.delete('/api/premium-categories/:id', async (req, res) => {
   try { await PremiumCategory.findByIdAndDelete(req.params.id); res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── PROMO BANNERS (dynamic header-color banners) ──────────────
+app.get('/api/promo-banners', async (req, res) => {
+  try {
+    const banners = await PromoBanner.find({}).sort({ displayOrder: 1, createdAt: -1 }).lean();
+    res.json({ success: true, banners });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.post('/api/promo-banners', async (req, res) => {
+  try {
+    const body = { ...req.body };
+    if (body.headerColorMode === 'manual') {
+      body.autoDetectedColor = '';
+    } else {
+      body.headerColorMode = 'auto';
+      body.autoDetectedColor = body.imageUrl ? await detectDominantColor(body.imageUrl) : '#FFFFFF';
+    }
+    const b = new PromoBanner(body);
+    await b.save();
+    res.json({ success: true, banner: b });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.put('/api/promo-banners/:id', async (req, res) => {
+  try {
+    const body = { ...req.body };
+    if (body.headerColorMode === 'manual') {
+      body.autoDetectedColor = '';
+    } else if (body.headerColorMode === 'auto' && body.imageUrl) {
+      body.autoDetectedColor = await detectDominantColor(body.imageUrl);
+    }
+    const b = await PromoBanner.findByIdAndUpdate(req.params.id, body, { new: true, strict: false });
+    if (!b) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, banner: b });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.delete('/api/promo-banners/:id', async (req, res) => {
+  try {
+    await PromoBanner.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Deleted' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── FEATURED COLLECTIONS ───────────────────────────────────────
+app.get('/api/collections', async (req, res) => {
+  try {
+    const collections = await FeaturedCollection.find({}).sort({ displayOrder: 1, createdAt: -1 }).lean();
+    const productIds = [...new Set(collections.flatMap(c => c.productIds || []))];
+    const products = productIds.length
+      ? await Product.find({ _id: { $in: productIds } }).lean()
+      : [];
+    const productMap = {};
+    products.forEach(p => { productMap[String(p._id)] = p; });
+    const withProducts = collections.map(c => ({
+      ...c,
+      products: (c.productIds || []).map(id => productMap[String(id)]).filter(Boolean),
+    }));
+    res.json({ success: true, collections: withProducts });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.post('/api/collections', async (req, res) => {
+  try {
+    const c = new FeaturedCollection(req.body);
+    await c.save();
+    res.json({ success: true, collection: c });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.put('/api/collections/:id', async (req, res) => {
+  try {
+    const c = await FeaturedCollection.findByIdAndUpdate(req.params.id, req.body, { new: true, strict: false });
+    if (!c) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, collection: c });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.delete('/api/collections/:id', async (req, res) => {
+  try {
+    await FeaturedCollection.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Deleted' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.get('/api/collections/:id/products', async (req, res) => {
+  try {
+    const c = await FeaturedCollection.findById(req.params.id).lean();
+    if (!c) return res.status(404).json({ success: false, message: 'Not found' });
+    const products = (c.productIds || []).length
+      ? await Product.find({ _id: { $in: c.productIds } }).lean()
+      : [];
+    res.json({ success: true, collection: c, products });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ── SPECIAL SECTION ───────────────────────────────────────────
