@@ -422,7 +422,7 @@ const FeaturedCollectionSchema = new mongoose.Schema({
   productIds:      { type: [String], default: [] },
   displayOrder:    { type: Number, default: 0 },
   isActive:        { type: Boolean, default: true },
-  cardBorderColor: { type: String, default: '#000000' }, // outline color shown around the card, both in the warehouse admin and the customer app
+  cardBorderColor: { type: String, default: '' }, // outline color shown around the card — empty means no outline; only set when the admin explicitly picks one
 }, { timestamps: true, strict: false });
 
 // ── MODELS ───────────────────────────────────────────────────
