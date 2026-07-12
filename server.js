@@ -423,6 +423,7 @@ const FeaturedCollectionSchema = new mongoose.Schema({
   displayOrder:    { type: Number, default: 0 },
   isActive:        { type: Boolean, default: true },
   cardBorderColor: { type: String, default: '' }, // outline color shown around the card — empty means no outline; only set when the admin explicitly picks one
+  showTitleOnCard: { type: Boolean, default: true }, // whether the title-text overlay bar shows on the customer-app card
 }, { timestamps: true, strict: false });
 
 // ── MODELS ───────────────────────────────────────────────────
