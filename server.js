@@ -415,13 +415,14 @@ const PromoBannerSchema = new mongoose.Schema({
 }, { timestamps: true, strict: false });
 
 const FeaturedCollectionSchema = new mongoose.Schema({
-  title:        { type: String, required: true },
-  coverImage:   { type: String, required: true },
-  mediaType:    { type: String, default: 'image', enum: ['image', 'gif', 'video'] },
-  badgeText:    { type: String, default: '' },
-  productIds:   { type: [String], default: [] },
-  displayOrder: { type: Number, default: 0 },
-  isActive:     { type: Boolean, default: true },
+  title:           { type: String, required: true },
+  coverImage:      { type: String, required: true },
+  mediaType:       { type: String, default: 'image', enum: ['image', 'gif', 'video'] },
+  badgeText:       { type: String, default: '' },
+  productIds:      { type: [String], default: [] },
+  displayOrder:    { type: Number, default: 0 },
+  isActive:        { type: Boolean, default: true },
+  cardBorderColor: { type: String, default: '#000000' }, // outline color shown around the card, both in the warehouse admin and the customer app
 }, { timestamps: true, strict: false });
 
 // ── MODELS ───────────────────────────────────────────────────
