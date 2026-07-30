@@ -22,7 +22,10 @@ const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } 
 
 app.use(compression());
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+// verify callback stashes the raw request bytes on req.rawBody — needed to check
+// the Razorpay webhook's HMAC signature, which must be computed over the exact
+// raw payload (not a re-serialized copy of the parsed JSON).
+app.use(express.json({ limit: '10mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use((req, res, next) => {
   if (req.method === 'GET') res.set('Cache-Control', 'public, max-age=300');
   next();
@@ -107,15 +110,16 @@ const CategorySchema = new mongoose.Schema({
 }, { timestamps: true, strict: false });
 
 const MotherCategorySchema = new mongoose.Schema({
-  name:         String,
-  categoryId:   { type: String, unique: true },
-  iconUrl:      String,
-  color:        String,
-  bg:           String,
-  active:       { type: Boolean, default: true },
-  order:        { type: Number, default: 0 },
-  position:     { type: Number, default: 0 },
-  bannerImages: { type: [String], default: [] },
+  name:          String,
+  categoryId:    { type: String, unique: true },
+  iconUrl:       String,
+  color:         String,
+  bg:            String,
+  active:        { type: Boolean, default: true },
+  order:         { type: Number, default: 0 },
+  position:      { type: Number, default: 0 },
+  bannerImages:  { type: [String], default: [] },
+  iconRealColor: { type: Boolean, default: false }, // true = show icon's own colors on customer app instead of a flat tint
 }, { timestamps: true });
 
 const FreshCategorySchema = new mongoose.Schema({
@@ -136,6 +140,13 @@ const OrderSchema = new mongoose.Schema({
   paymentStatus:       { type: String, default: 'pending', enum: ['pending', 'paid', 'failed'] },
   paymentId:           String,
   paymentOrderId:      String,
+  // Refund tracking (Razorpay) — only meaningful when paymentMethod === 'razorpay'
+  refundStatus:        { type: String, default: 'not_applicable', enum: ['not_applicable', 'pending', 'processing', 'completed', 'failed'] },
+  refundAmount:        Number,
+  refundId:            String,
+  refundInitiatedAt:   Date,
+  refundCompletedAt:   Date,
+  refundFailureReason: String,
   deliveryPartner:     Object,
   assignedTo:          { type: String, default: null },
   assignedName:        String,
@@ -424,6 +435,10 @@ const FeaturedCollectionSchema = new mongoose.Schema({
   isActive:        { type: Boolean, default: true },
   cardBorderColor: { type: String, default: '' }, // outline color shown around the card — empty means no outline; only set when the admin explicitly picks one
   showTitleOnCard: { type: Boolean, default: true }, // whether the title-text overlay bar shows on the customer-app card
+  targetPages:             { type: [String], default: ['home'] }, // simple page-level targets: home, allCategories
+  targetMotherCategoryIds: { type: [String], default: [] }, // specific Mother Category pages this card shows on
+  targetShopCategoryIds:   { type: [String], default: [] }, // specific Category (shop category) pages this card shows on
+  targetSubCategoryIds:    { type: [String], default: [] }, // specific Sub Category pages this card shows on
 }, { timestamps: true, strict: false });
 
 // ── MODELS ───────────────────────────────────────────────────
@@ -1232,7 +1247,10 @@ app.delete('/api/categories/:id', async (req, res) => {
 // ── MOTHER CATEGORIES ─────────────────────────────────────────
 app.get('/api/mother-categories', async (req, res) => {
   try {
-    const cats = await MotherCategory.find({}).sort({ order: 1, position: 1 }).lean();
+    // $ne:false (not a strict active:true) so legacy docs saved before this
+    // field existed still show up — only explicitly soft-deleted ones are hidden.
+    const filter = req.query.trash === 'true' ? { active: false } : { active: { $ne: false } };
+    const cats = await MotherCategory.find(filter).sort({ order: 1, position: 1 }).lean();
     res.json({ success: true, categories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1247,18 +1265,28 @@ app.put('/api/mother-categories/:id', async (req, res) => {
     res.json({ success: true, category: c });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+// Soft delete — moves the category to trash instead of permanently removing it,
+// so it can be restored later. Nothing here is ever hard-deleted from the DB.
 app.delete('/api/mother-categories/:id', async (req, res) => {
   try {
-    const r = await MotherCategory.findByIdAndDelete(req.params.id);
+    const r = await MotherCategory.findByIdAndUpdate(req.params.id, { active: false }, { new: true });
     if (!r) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, message: 'Deleted' });
+    res.json({ success: true, message: 'Moved to trash' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.put('/api/mother-categories/:id/restore', async (req, res) => {
+  try {
+    const r = await MotherCategory.findByIdAndUpdate(req.params.id, { active: true }, { new: true });
+    if (!r) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, category: r });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ── FRESH CATEGORIES ──────────────────────────────────────────
 app.get('/api/fresh-categories', async (req, res) => {
   try {
-    const cats = await FreshCategory.find({ active: true }).sort({ order: 1 }).lean();
+    const filter = req.query.trash === 'true' ? { active: false } : { active: { $ne: false } };
+    const cats = await FreshCategory.find(filter).sort({ order: 1 }).lean();
     res.json({ success: true, categories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1275,21 +1303,29 @@ app.put('/api/fresh-categories/:id', async (req, res) => {
 });
 app.delete('/api/fresh-categories/:id', async (req, res) => {
   try {
-    const r = await FreshCategory.findByIdAndDelete(req.params.id);
+    const r = await FreshCategory.findByIdAndUpdate(req.params.id, { active: false }, { new: true });
     if (!r) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, message: 'Deleted' });
+    res.json({ success: true, message: 'Moved to trash' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.put('/api/fresh-categories/:id/restore', async (req, res) => {
+  try {
+    const r = await FreshCategory.findByIdAndUpdate(req.params.id, { active: true }, { new: true });
+    if (!r) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, category: r });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ── SUB CATEGORIES ────────────────────────────────────────────
 app.get('/api/sub-categories', async (req, res) => {
   try {
-    const { categoryId, motherCategoryId, shopCategoryId, parentType } = req.query;
+    const { categoryId, motherCategoryId, shopCategoryId, parentType, trash } = req.query;
     const filter = {};
     if (categoryId)       filter.categoryId       = categoryId;
     if (motherCategoryId) filter.motherCategoryId = motherCategoryId;
     if (shopCategoryId)   filter.shopCategoryId   = shopCategoryId;
     if (parentType)       filter.parentType       = parentType;
+    filter.active = trash === 'true' ? false : { $ne: false };
     const cats = await SubCategory.find(filter).sort({ position: 1 }).lean();
     res.json({ success: true, categories: cats, subCategories: cats });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -1305,8 +1341,15 @@ app.put('/api/sub-categories/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 app.delete('/api/sub-categories/:id', async (req, res) => {
-  try { await SubCategory.findByIdAndDelete(req.params.id); res.json({ success: true }); }
+  try { await SubCategory.findByIdAndUpdate(req.params.id, { active: false }); res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.put('/api/sub-categories/:id/restore', async (req, res) => {
+  try {
+    const r = await SubCategory.findByIdAndUpdate(req.params.id, { active: true }, { new: true });
+    if (!r) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, category: r });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ── SECTIONS ──────────────────────────────────────────────────
@@ -1390,7 +1433,7 @@ app.get('/api/home-sections', async (req, res) => {
 // ── SHOP CATEGORIES ───────────────────────────────────────────
 app.get('/api/shop-categories', async (req, res) => {
   try {
-    const filter = { active: true };
+    const filter = { active: req.query.trash === 'true' ? false : true };
     if (req.query.motherCategoryId) filter.motherCategoryId = req.query.motherCategoryId;
     const cats = await ShopCategory.find(filter).sort({ position: 1 }).lean();
     res.json({ success: true, categories: cats });
@@ -1418,9 +1461,20 @@ app.put('/api/shop-categories/:id', async (req, res) => {
     res.json({ success: true, category: c });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+// Soft delete — moves to trash instead of permanently removing, so it can be restored.
 app.delete('/api/shop-categories/:id', async (req, res) => {
-  try { await ShopCategory.findByIdAndDelete(req.params.id); res.json({ success: true }); }
-  catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  try {
+    const r = await ShopCategory.findByIdAndUpdate(req.params.id, { active: false }, { new: true });
+    if (!r) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+app.put('/api/shop-categories/:id/restore', async (req, res) => {
+  try {
+    const r = await ShopCategory.findByIdAndUpdate(req.params.id, { active: true }, { new: true });
+    if (!r) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, category: r });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ── FRESH SECTION ─────────────────────────────────────────────
@@ -1762,7 +1816,9 @@ app.put('/api/orders/:id/cancel', async (req, res) => {
       });
       if (onlineDeliveryPartners[pid]) onlineDeliveryPartners[pid].busy = false;
     }
-    res.json({ success: true, order });
+    // Auto-refund — safe no-op for COD / non-online orders (see triggerRefundForOrder)
+    const refundedOrder = await triggerRefundForOrder(order);
+    res.json({ success: true, order: refundedOrder || order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -2363,20 +2419,198 @@ async function detectDominantColor(imageUrl) {
 
 // ── RAZORPAY ──────────────────────────────────────────────────
 const Razorpay = require('razorpay');
-const razorpay = new Razorpay({ key_id: 'rzp_test_Su4auXVDl2cV9I', key_secret: 'T7KETzJA2yyfkgwONRd4C0sS' });
+// Same test-mode keys the app already used (now sourced from .env, with the
+// original hardcoded values kept as a fallback so nothing breaks if the
+// deployed environment doesn't pick up the new .env vars).
+const RAZORPAY_KEY_ID     = (process.env.RAZORPAY_KEY_ID     || 'rzp_test_Su4auXVDl2cV9I').trim();
+const RAZORPAY_KEY_SECRET = (process.env.RAZORPAY_KEY_SECRET || 'T7KETzJA2yyfkgwONRd4C0sS').trim();
+console.log(
+  `[RAZORPAY INIT] key_id=${RAZORPAY_KEY_ID.slice(0, 8)}...${RAZORPAY_KEY_ID.slice(-4)} ` +
+  `(mode=${RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'LIVE' : RAZORPAY_KEY_ID.startsWith('rzp_test_') ? 'TEST' : 'UNKNOWN'}, ` +
+  `fromEnv=${!!process.env.RAZORPAY_KEY_ID}) secret_len=${RAZORPAY_KEY_SECRET.length}`
+);
+const razorpay = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+
+// TEMPORARY DIAGNOSTIC ROUTE — remove once the live-mode key issue is confirmed fixed.
+// Never prints the full key/secret, only enough to verify they loaded correctly.
+app.get('/api/test-razorpay-key', (req, res) => {
+  const mask = (v) => (v ? `${v.slice(0, 4)}...${v.slice(-4)} (len=${v.length})` : 'MISSING');
+  res.json({
+    key_id_masked:      mask(RAZORPAY_KEY_ID),
+    key_id_mode:        RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'LIVE' : RAZORPAY_KEY_ID.startsWith('rzp_test_') ? 'TEST' : 'UNKNOWN/INVALID',
+    key_id_from_env:    !!process.env.RAZORPAY_KEY_ID,
+    key_secret_masked:  mask(RAZORPAY_KEY_SECRET),
+    key_secret_from_env: !!process.env.RAZORPAY_KEY_SECRET,
+    has_whitespace_issue: RAZORPAY_KEY_ID !== RAZORPAY_KEY_ID.trim() || RAZORPAY_KEY_SECRET !== RAZORPAY_KEY_SECRET.trim(),
+  });
+});
+
 app.post('/api/payment/create-order', async (req, res) => {
   try {
     const order = await razorpay.orders.create({ amount: req.body.amount * 100, currency: 'INR', receipt: 'order_' + Date.now() });
+    console.log(`[RAZORPAY CREATE-ORDER] success order_id=${order.id} amount=${order.amount} key_mode=${RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'LIVE' : 'TEST'}`);
     res.json({ success: true, order });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) {
+    console.error('[RAZORPAY CREATE-ORDER] failed:', err.message);
+    console.error('[RAZORPAY CREATE-ORDER] err.error:', err.error);
+    console.error('[RAZORPAY CREATE-ORDER] full error:', JSON.stringify(err));
+    res.status(500).json({ success: false, message: err.message, error: err.error || null });
+  }
 });
 app.post('/api/payment/verify', async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
     const crypto = require('crypto');
-    const expected = crypto.createHmac('sha256', 'T7KETzJA2yyfkgwONRd4C0sS').update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
-    res.json({ success: expected === razorpay_signature, message: expected === razorpay_signature ? 'Payment verified!' : 'Invalid signature' });
+    const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
+    const ok = expected === razorpay_signature;
+    if (!ok) {
+      console.error(`[RAZORPAY VERIFY] signature mismatch for order_id=${razorpay_order_id} payment_id=${razorpay_payment_id}`);
+    } else {
+      console.log(`[RAZORPAY VERIFY] success order_id=${razorpay_order_id} payment_id=${razorpay_payment_id}`);
+    }
+    res.json({ success: ok, message: ok ? 'Payment verified!' : 'Invalid signature' });
+  } catch (err) {
+    console.error('[RAZORPAY VERIFY] failed:', err.message, JSON.stringify(err));
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Fallback status check for the UPI-app-redirect flow — when checkout.js's
+// handler callback never fires because the customer paid inside GPay/PhonePe/
+// Paytm and the WebView didn't resume, the app polls this route (using the
+// Razorpay order_id, since our own Order doc doesn't exist until after a
+// successful payment) instead of waiting on a signature we'll never receive.
+app.get('/api/payment/status/:razorpayOrderId', async (req, res) => {
+  try {
+    const { razorpayOrderId } = req.params;
+    const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
+    const paid   = payments.items.find(p => p.status === 'captured' || p.status === 'authorized');
+    const failed = payments.items.find(p => p.status === 'failed');
+    console.log(`[PAYMENT STATUS] order_id=${razorpayOrderId} items=${payments.items.length} → ${paid ? 'paid' : failed ? 'failed' : 'pending'}`);
+    if (paid) {
+      return res.json({ success: true, status: 'paid', paymentId: paid.id });
+    }
+    if (failed) {
+      return res.json({ success: true, status: 'failed', paymentId: failed.id, reason: failed.error_description || null });
+    }
+    res.json({ success: true, status: 'pending' });
+  } catch (err) {
+    console.error(`[PAYMENT STATUS] failed for order_id=${req.params.razorpayOrderId}:`, err.message);
+    res.status(500).json({ success: false, status: 'error', message: err.message });
+  }
+});
+
+// ── REFUNDS ───────────────────────────────────────────────────
+// Single source of truth for triggering a Razorpay refund on an order.
+// Every code path that cancels an order (the /cancel route, retry endpoint,
+// future auto-cancel jobs, etc.) MUST go through this function — it is the
+// only place allowed to call razorpay.payments.refund, so the safety check
+// below can never be bypassed.
+async function triggerRefundForOrder(order) {
+  const hasOnlinePayment = order.paymentMethod === 'razorpay' && !!order.paymentId;
+
+  if (!hasOnlinePayment) {
+    console.log(`[REFUND] Skipped for order ${order._id} — no valid online payment found for this order (paymentMethod=${order.paymentMethod}, paymentId=${order.paymentId || 'none'})`);
+    await Order.findByIdAndUpdate(order._id, { refundStatus: 'not_applicable' });
+    return null;
+  }
+
+  try {
+    const refund = await razorpay.payments.refund(order.paymentId, {
+      amount: Math.round((order.total || 0) * 100), // paise
+    });
+    const updated = await Order.findByIdAndUpdate(
+      order._id,
+      {
+        refundStatus:      'processing',
+        refundId:          refund.id,
+        refundAmount:      order.total,
+        refundInitiatedAt: new Date(),
+        refundFailureReason: null,
+      },
+      { new: true }
+    );
+    console.log(`[REFUND] Initiated for order ${order._id} — refundId=${refund.id}`);
+    emitRefundUpdate(updated);
+    return updated;
+  } catch (err) {
+    console.error(`[REFUND] Razorpay refund API failed for order ${order._id}:`, err.message);
+    const updated = await Order.findByIdAndUpdate(
+      order._id,
+      { refundStatus: 'failed', refundFailureReason: err.message },
+      { new: true }
+    );
+    emitRefundUpdate(updated);
+    return updated;
+  }
+}
+
+// Broadcasts a refund status change to both apps — same room pattern as emitOrderUpdate.
+function emitRefundUpdate(order) {
+  if (!order) return;
+  io.to('warehouse_admin').emit('refund_status_update', order);
+  if (order.userPhone) io.to('customer_' + order.userPhone).emit('refund_status_update', order);
+}
+
+// Retry a refund that previously failed — reuses the exact same safety-checked function.
+app.post('/api/orders/:id/retry-refund', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+    const updated = await triggerRefundForOrder(order);
+    res.json({ success: true, order: updated || order });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Razorpay webhook — refund.processed / refund.failed
+app.post('/api/webhooks/razorpay', async (req, res) => {
+  try {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) {
+      console.error('[REFUND WEBHOOK] RAZORPAY_WEBHOOK_SECRET is not set — rejecting webhook. Set it up in .env (see Razorpay Dashboard → Settings → Webhooks).');
+      return res.status(500).json({ success: false, message: 'Webhook secret not configured' });
+    }
+
+    const crypto = require('crypto');
+    const signature = req.headers['x-razorpay-signature'];
+    const expected  = crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
+    if (signature !== expected) {
+      console.error('[REFUND WEBHOOK] Invalid signature — ignoring payload');
+      return res.status(400).json({ success: false, message: 'Invalid signature' });
+    }
+
+    const event  = req.body.event;
+    const entity = req.body.payload?.refund?.entity;
+    if (!entity) return res.json({ success: true }); // not a refund event we care about
+
+    const refundId = entity.id;
+    const order = await Order.findOne({ refundId });
+    if (!order) {
+      console.error(`[REFUND WEBHOOK] No order found for refundId ${refundId}`);
+      return res.json({ success: true });
+    }
+
+    let updated = order;
+    if (event === 'refund.processed') {
+      updated = await Order.findByIdAndUpdate(
+        order._id,
+        { refundStatus: 'completed', refundCompletedAt: new Date() },
+        { new: true }
+      );
+    } else if (event === 'refund.failed') {
+      updated = await Order.findByIdAndUpdate(
+        order._id,
+        { refundStatus: 'failed', refundFailureReason: entity.error_description || 'Refund failed at Razorpay' },
+        { new: true }
+      );
+    }
+
+    emitRefundUpdate(updated);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[REFUND WEBHOOK] Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // ── THEME ─────────────────────────────────────────────────────
@@ -2750,7 +2984,7 @@ app.get('/api/special-section', async (req, res) => {
 
 app.put('/api/special-section', async (req, res) => {
   try {
-    const { titleLine1, titleLine2, subtitle, smallText, imageUrl, showImage } = req.body;
+    const { titleLine1, titleLine2, subtitle, smallText, imageUrl, showImage, active } = req.body;
     const update = {};
     if (titleLine1 !== undefined) update.titleLine1 = titleLine1;
     if (titleLine2 !== undefined) update.titleLine2 = titleLine2;
@@ -2758,6 +2992,7 @@ app.put('/api/special-section', async (req, res) => {
     if (smallText  !== undefined) update.smallText  = smallText;
     if (imageUrl   !== undefined) update.imageUrl   = imageUrl;
     if (showImage  !== undefined) update.showImage  = showImage;
+    if (active     !== undefined) update.active     = active;
     const section = await SpecialSection.findOneAndUpdate(
       {},
       { $set: update },
